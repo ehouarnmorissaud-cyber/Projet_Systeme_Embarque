@@ -16,7 +16,7 @@
 
 // Objets
 RTC_DS3231 rtc;// Objet pour communiquer avec le module RTC DS3231
-SoftwareSerial gpsSerial(6, 7); // RX, TX 
+SoftwareSerial gpsSerial(6, 7); // branchement du GPS RX, TX 
 TinyGPSPlus gps; // Objet pour décoder les données  module GPS
 Adafruit_BMP280 bmp;// Capteur numérique de température et pression BMP280
 File fichier;// Objet pour gérer les fichiers sur la carte SD
