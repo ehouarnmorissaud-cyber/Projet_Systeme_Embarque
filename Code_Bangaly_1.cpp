@@ -44,6 +44,76 @@ bool bouton_appuye;             // État du bouton connecté à D2
 
 // Mode de fonctionnement
 byte mode_actuel;               // Mode actif du système (0 = STANDARD, 1 = ECONOMIQUE, etc.)
+// Met à jour les variables annee, mois, jour, heure, minute, seconde à partir du module RTC DS3231
+void updateDateTime() {
+  DateTime now = rtc.now();
+  annee = now.year();
+  mois = now.month();
+  jour = now.day();
+  heure = now.hour();
+  minute = now.minute();
+  seconde = now.second();
+}
+
+// Met à jour les variables temperature_air, luminosite et pression_atmospherique
+// en lisant les capteurs analogiques et le capteur BMP280 (VMA335)
+void updateSensors() {
+  temperature_air = bmp.readTemperature();       // Température via BMP280
+  luminosite = analogRead(PIN_LUMIERE);          // Lumière analogique
+  pression_atmospherique = analogRead(PIN_PRESSION); // Pression analogique
+}
+
+// Lit les données GPS, met à jour latitude et longitude,
+// et affiche la position dans le moniteur série si elle est valide.
+// Si la position est invalide, met les coordonnées à 0 et signale une erreur par LED.
+void getAndPrintGPSPosition() {
+  while (gpsSerial.available()) {
+    gps.encode(gpsSerial.read());
+  }
+
+  if (gps.location.isValid()) {
+    latitude = gps.location.lat();
+    longitude = gps.location.lng();
+
+    Serial.print("GPS : ");
+    Serial.print(latitude);
+    Serial.print(", ");
+    Serial.println(longitude);
+  } else {
+    latitude = 0.0;
+    longitude = 0.0;
+    Serial.println("GPS non disponible");
+    setLEDColor("ROUGE_JAUNE"); // Erreur GPS
+  }
+}
+
+// Ouvre le fichier LOG sur la carte SD et enregistre les données capteurs + GPS + horloge
+// Si la carte est absente ou le fichier inaccessible, signale une erreur par LED
+void saveDataToSD() {
+  if (carteSD_presente) {
+    fichier = SD.open("200531_0.LOG", FILE_WRITE);
+    if (fichier) {
+      fichier.print(annee); fichier.print(",");
+      fichier.print(mois); fichier.print(",");
+      fichier.print(jour); fichier.print(",");
+      fichier.print(heure); fichier.print(",");
+      fichier.print(minute); fichier.print(",");
+      fichier.print(seconde); fichier.print(",");
+      fichier.print(temperature_air); fichier.print(",");
+      fichier.print(luminosite); fichier.print(",");
+      fichier.print(pression_atmospherique); fichier.print(",");
+      fichier.print(latitude); fichier.print(",");
+      fichier.println(longitude);
+      fichier.close();
+    } else {
+      setLEDColor("ROUGE_BLANC_LONG"); // Erreur écriture SD
+    }
+  } else {
+    setLEDColor("ROUGE_BLANC"); // Carte SD absente ou pleine
+  }
+}
+
+
 void setup() {
   // Initialisation des communications série
   Serial.begin(9600);          // Pour le moniteur série
@@ -93,54 +163,13 @@ void setup() {
 void modeStandard() {
   Serial.println("Mode STANDARD actif");
   setLEDColor("VERT");
-   // Lecture RTC
-  DateTime now = rtc.now();
-  annee = now.year(); mois = now.month(); jour = now.day();
-  heure = now.hour(); minute = now.minute(); seconde = now.second();
 
-  // Lecture capteurs
-  luminosite = analogRead(PIN_LUMIERE);
-  pression_atmospherique = analogRead(PIN_PRESSION);
-  temperature_air = bmp.readTemperature();
-
-  // Lecture GPS
-  while (gpsSerial.available()) {
-    gps.encode(gpsSerial.read());
-  }
-  if (gps.location.isValid()) {
-    latitude = gps.location.lat();
-    longitude = gps.location.lng();
-  } else {
-    latitude = 0.0;
-    longitude = 0.0;
-    setLEDColor("ROUGE_JAUNE"); // Erreur GPS
-  }
-
-  // Sauvegarde SD
-  if (carteSD_presente) {
-    fichier = SD.open("200531_0.LOG", FILE_WRITE);//ouvre un fichier sur la carte SD
-    //Vérifie que le fichier a bien été ouvert sur la carte SD. 
-    if (fichier){
-      fichier.print(annee); fichier.print(",");
-      fichier.print(mois); fichier.print(",");
-      fichier.print(jour); fichier.print(",");
-      fichier.print(heure); fichier.print(",");
-      fichier.print(minute); fichier.print(",");
-      fichier.print(seconde); fichier.print(",");
-      fichier.print(temperature_air); fichier.print(",");
-      fichier.print(luminosite); fichier.print(",");
-      fichier.print(pression_atmospherique); fichier.print(",");
-      fichier.print(latitude); fichier.print(",");
-      fichier.println(longitude);
-      fichier.close();//Ferme proprement le fichier après l’écriture.
-    } else {
-      setLEDColor("ROUGE_BLANC_LONG"); // Erreur écriture SD
-    }
-  } else {
-    setLEDColor("ROUGE_BLANC"); // Carte SD pleine ou absente
-  }
+  updateDateTime();             // Lecture RTC
+  updateSensors();              // Lecture capteurs
+  getAndPrintGPSPosition();     // Lecture + affichage GPS
+  saveDataToSD();               // Sauvegarde SD
 }
-}
+
 
 void modeConfiguration() {
   Serial.println("Mode CONFIGURATION actif");
@@ -162,71 +191,27 @@ void modeConfiguration() {
 
 void modeEconomique() {
   Serial.println("Mode ÉCONOMIQUE actif");
-
-  //  LED bleue continue pour signaler le mode
   setLEDColor("BLEU");
 
-  //  Lecture RTC
-  DateTime now = rtc.now();
-  annee = now.year();
-  mois = now.month();
-  jour = now.day();
-  heure = now.hour();
-  minute = now.minute();
-  seconde = now.second();
+  updateDateTime();             // Lecture RTC
 
-  //  Lecture capteurs allégée
-  luminosite = analogRead(PIN_LUMIERE);
+  // Lecture capteurs allégée
   temperature_air = bmp.readTemperature();
+  luminosite = analogRead(PIN_LUMIERE);
 
-  //  GPS une mesure sur deux
+  // GPS une mesure sur deux
   static bool gpsActif = false;
-  gpsActif = !gpsActif; // alterne à chaque appel
-
+  gpsActif = !gpsActif;
   if (gpsActif) {
-    while (gpsSerial.available()) {
-      gps.encode(gpsSerial.read());
-    }
-    if (gps.location.isValid()) {
-      latitude = gps.location.lat();
-      longitude = gps.location.lng();
-    } else {
-      latitude = 0.0;
-      longitude = 0.0;
-      setLEDColor("ROUGE_JAUNE"); // Erreur GPS
-    }
+    getAndPrintGPSPosition();   // Lecture + affichage GPS
   }
 
-  // Sauvegarde SD
-  if (carteSD_presente) {
-    fichier = SD.open("200531_0.LOG", FILE_WRITE);
-    if (fichier) {
-      fichier.print(annee); fichier.print(",");
-      fichier.print(mois); fichier.print(",");
-      fichier.print(jour); fichier.print(",");
-      fichier.print(heure); fichier.print(",");
-      fichier.print(minute); fichier.print(",");
-      fichier.print(seconde); fichier.print(",");
-      fichier.print(temperature_air); fichier.print(",");
-      fichier.print(luminosite); fichier.print(",");
-      fichier.print(latitude); fichier.print(",");
-      fichier.println(longitude);
-      fichier.close();
-    } else {
-      setLEDColor("ROUGE_BLANC_LONG"); // Erreur écriture SD
-    }
-  } else {
-    setLEDColor("ROUGE_BLANC"); // Carte SD absente ou pleine
-  }
-
-  //  Temporisation allongée : LOG_INTERVAL × 2
-  delay(LOG_INTERVAL * 2 * 60000); // en millisecondes
+  saveDataToSD();               // Sauvegarde SD
+  delay(LOG_INTERVAL * 2 * 60000); // Temporisation
 }
 
 void modeMaintenance() {
   Serial.println("Mode MAINTENANCE actif");
-
-  // LED orange continue
   setLEDColor("ORANGE");
 
   // Affichage capteurs en direct
@@ -234,18 +219,7 @@ void modeMaintenance() {
   Serial.print("Lumière : "); Serial.println(analogRead(PIN_LUMIERE));
   Serial.print("Pression : "); Serial.println(analogRead(PIN_PRESSION));
 
-  // GPS
-  while (gpsSerial.available()) {
-    gps.encode(gpsSerial.read());
-  }
-  if (gps.location.isValid()) {
-    Serial.print("GPS : ");
-    Serial.print(gps.location.lat()); Serial.print(", ");
-    Serial.println(gps.location.lng());
-  } else {
-    Serial.println("GPS non disponible");
-    setLEDColor("ROUGE_JAUNE");
-  }
+  getAndPrintGPSPosition(); // Lecture + affichage GPS
 
-  // Carte SD désactivée 
+  // Carte SD désactivée
 }
