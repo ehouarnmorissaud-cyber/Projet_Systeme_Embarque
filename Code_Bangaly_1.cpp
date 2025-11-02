@@ -239,7 +239,6 @@ void modeConfiguration() {
       // Traitement des différentes commandes
       if (commande == "LUMIN" && (valeur == 0 || valeur == 1)) {
         LUMIN = valeur;
-        Serial.print("LUMIN mis à jour : "); Serial.println(LUMIN);
       }
       else if (commande == "LUMIN_LOW" && valeur >= 0 && valeur <= 1023) {
         if (valeur > LUMIN_HIGH) {
@@ -247,7 +246,6 @@ void modeConfiguration() {
         } 
         else {
           LUMIN_LOW = valeur;
-          Serial.print("LUMIN_LOW mis à jour : "); Serial.println(LUMIN_LOW);
         }
       }
       else if (commande == "LUMIN_HIGH" && valeur >= 0 && valeur <= 1023) {
@@ -257,12 +255,10 @@ void modeConfiguration() {
         }
         else {
         LUMIN_HIGH = valeur;
-        Serial.print("LUMIN_HIGH mis à jour : "); Serial.println(LUMIN_HIGH);
         }
       }
       else if (commande == "TEMP_AIR" && (valeur == 0 || valeur == 1)) {
         TEMP_AIR = valeur;
-        Serial.print("TEMP_AIR mis à jour : "); Serial.println(TEMP_AIR);
       }
       else if (commande == "MIN_TEMP_AIR" && valeur >= -40 && valeur <= 85) {
         if (valeur > MAX_TEMP_AIR)
@@ -271,7 +267,6 @@ void modeConfiguration() {
         }
         else {
         MIN_TEMP_AIR = valeur;
-        Serial.print("MIN_TEMP_AIR mis à jour : "); Serial.println(MIN_TEMP_AIR);
         }
       }
       else if (commande == "MAX_TEMP_AIR" && valeur >= -40 && valeur <= 85) {
@@ -281,12 +276,10 @@ void modeConfiguration() {
         }
         else {
         MAX_TEMP_AIR = valeur;
-        Serial.print("MAX_TEMP_AIR mis à jour : "); Serial.println(MAX_TEMP_AIR);
         }
       }
       else if (commande == "HYGR" && (valeur == 0 || valeur == 1)) {
         HYGR = valeur;
-        Serial.print("HYGR mis à jour : "); Serial.println(HYGR);
       }
       else if (commande == "HYGR_MINT" && valeur >= -40 && valeur <= 85) {
         if (valeur > HYGR_MAXT)
@@ -295,7 +288,6 @@ void modeConfiguration() {
         }
         else {
         HYGR_MINT = valeur;
-        Serial.print("HYGR_MINT mis à jour : "); Serial.println(HYGR_MINT);
         }
       }
       else if (commande == "HYGR_MAXT" && valeur >= -40 && valeur <= 85) {
@@ -305,12 +297,10 @@ void modeConfiguration() {
         }
         else {
         HYGR_MAXT = valeur;
-        Serial.print("HYGR_MAXT mis à jour : "); Serial.println(HYGR_MAXT);
         }
       }
       else if (commande == "PRESSURE" && (valeur == 0 || valeur == 1)) {
         PRESSURE = valeur;
-        Serial.print("PRESSURE mis à jour : "); Serial.println(PRESSURE);
       }
       else if (commande == "PRESSURE_MIN" && valeur >= 300 && valeur <= 1100) {
         if (valeur > PRESSURE_MAX)
@@ -319,7 +309,6 @@ void modeConfiguration() {
         }
         else {  
         PRESSURE_MIN = valeur;
-        Serial.print("PRESSURE_MIN mis à jour : "); Serial.println(PRESSURE_MIN);
         }
       }
       else if (commande == "PRESSURE_MAX" && valeur >= 300 && valeur <= 1100) {
@@ -329,20 +318,16 @@ void modeConfiguration() {
         }
         else {
         PRESSURE_MAX = valeur;
-        Serial.print("PRESSURE_MAX mis à jour : "); Serial.println(PRESSURE_MAX);
         }
       }
       else if (commande == "LOG_INTERVAL" && valeur > 0) {
         LOG_INTERVAL = valeur;
-        Serial.print("LOG_INTERVAL mis à jour : "); Serial.println(LOG_INTERVAL);
       }
       else if (commande == "FILE_MAX_SIZE" && valeur > 0) {
         FILE_MAX_SIZE = valeur;
-        Serial.print("FILE_MAX_SIZE mis à jour : "); Serial.println(FILE_MAX_SIZE);
       }
       else if (commande == "TIMEOUT" && valeur > 0) {
         TIMEOUT = valeur;
-        Serial.print("TIMEOUT mis à jour : "); Serial.println(TIMEOUT);
       }
       else {
         Serial.print("La valeur rentrée est n'est pas correcte pour la commande "); Serial.println(commande);
