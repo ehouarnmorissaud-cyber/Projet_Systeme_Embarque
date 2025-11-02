@@ -27,6 +27,24 @@ int TIMEOUT = 30;       // secondes timeout acquisition capteur
 
 int version_logiciel = 1.0; // Version du logiciel embarqué
 
+// Remise des valeurs de départ pour l'ensemble des paramètres (RESET en lode configuration)
+void resetConfiguration() {
+  LUMIN = 1;
+  LUMIN_LOW = 255;
+  LUMIN_HIGH = 768;
+  TEMP_AIR = 1;
+  MIN_TEMP_AIR = -10;
+  MAX_TEMP_AIR = 60;
+  HYGR = 1;
+  HYGR_MINT = 0;
+  HYGR_MAXT = 50;
+  PRESSURE = 1;
+  PRESSURE_MIN = 850;
+  PRESSURE_MAX = 1080;
+  LOG_INTERVAL = 10;
+  FILE_MAX_SIZE = 4096;
+  TIMEOUT = 30;
+}
 // ========== Fonction mode Configuration ==========
 
 void modeConfiguration() {
@@ -160,6 +178,10 @@ void modeConfiguration() {
     }
     else if (ligne == "VERSION){
       Serial.print("Version du logiciel embarqué : "); Serial.println(version_logiciel);
+    }
+    else if (ligne == "RESET"){
+      Serial.println("Réinitialisation de l’ensemble des paramètres à leurs valeurs par défaut.");
+      resetConfiguration();
     }
     else { // Si il n'y a eu aucun "=" dans la ligne, et que la valeur est donc à -1
       Serial.println("Le format de la commande saisie n'est pas valide, merci d'utiliser le format suivant :'COMMANDE=VALEUR'");
