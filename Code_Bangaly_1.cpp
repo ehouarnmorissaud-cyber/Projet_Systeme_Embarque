@@ -9,7 +9,8 @@
 
 // Définition des broches
 #define PIN_LED 4            // LED multicolore (pilotée par PWM ou multiplexage)
-#define PIN_BOUTON 2         // Bouton d’interruption
+#define PIN_BOUTON_VERT 2  
+#define PIN_BOUTON_ROUGE 3 // Button vert
 #define PIN_LUMIERE A0       // Capteur de lumière
 #define PIN_PRESSION A1      // Capteur de pression analogique
 #define PIN_SD_CS 10         // Chip Select de la carte SD
