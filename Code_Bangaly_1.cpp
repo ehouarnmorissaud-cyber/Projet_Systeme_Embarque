@@ -401,3 +401,17 @@ void modeMaintenance() {
 
   // Carte SD désactivée
 }
+
+// ========== Boucle principale ==========
+
+void loop() {
+  if (mode_actuel == 0) {
+    modeStandard();
+  } else if (mode_actuel == 1) {
+    modeConfiguration();
+  } else if (mode_actuel == 2) {
+    modeEconomique();
+  } else if (mode_actuel == 3) {
+    modeMaintenance();
+  }
+}
