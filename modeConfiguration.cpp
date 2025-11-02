@@ -25,6 +25,8 @@ int LOG_INTERVAL = 10;  // minutes entre deux mesures (défaut 10)
 int FILE_MAX_SIZE = 4096;// octets avant archivage
 int TIMEOUT = 30;       // secondes timeout acquisition capteur
 
+int version_logiciel = 1.0; // Version du logiciel embarqué
+
 // ========== Fonction mode Configuration ==========
 
 void modeConfiguration() {
@@ -153,11 +155,14 @@ void modeConfiguration() {
         Serial.print("TIMEOUT mis à jour : "); Serial.println(TIMEOUT);
       }
       else {
-        Serial.print("La valeur rentrée est n'est pas correcte pour la commande "); Serial.println(commande);
+        Serial.print("La commande saisie n'est pas valide ");
       }
     }
+    else if (ligne == "VERSION){
+      Serial.print("Version du logiciel embarqué : "); Serial.println(version_logiciel);
+    }
     else { // Si il n'y a eu aucun "=" dans la ligne, et que la valeur est donc à -1
-      Serial.println("La commande saisie n'est pas valide, merci d'utiliser le format suivant :'COMMANDE=VALEUR'");
+      Serial.println("Le format de la commande saisie n'est pas valide, merci d'utiliser le format suivant :'COMMANDE=VALEUR'");
     }
 
     }
