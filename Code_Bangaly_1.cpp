@@ -91,7 +91,7 @@ void resetConfiguration() {
   TIMEOUT = 30;
 }
 // Mode de fonctionnement
-byte mode_actuel;               // Mode actif du système (0 = STANDARD, 1 = ECONOMIQUE, etc.)
+byte mode_actuel;               // Mode actif du système (0 = STANDARD, etc.)
 // Met à jour les variables annee, mois, jour, heure, minute, seconde à partir du module RTC DS3231
 void updateDateTime() {
   DateTime now = rtc.now();
