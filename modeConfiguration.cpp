@@ -187,7 +187,7 @@ void modeConfiguration() {
       Serial.println("Le format de la commande saisie n'est pas valide, merci d'utiliser le format suivant :'COMMANDE=VALEUR'");
     }
 
-    }
+  }
     
     
   if (millis() - lastActivity > 1800000) { // 30 min
