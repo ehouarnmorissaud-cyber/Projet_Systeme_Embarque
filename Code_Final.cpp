@@ -90,6 +90,7 @@ void resetConfiguration() {
   TIMEOUT = 30;
 }
 // Mode de fonctionnement
+byte mode_precedent;           // Mode précédemment utilisé avant le mode actuel
 byte mode_actuel;               // Mode actif du système (0 = STANDARD, 1 = ECONOMIQUE, etc.)
 // Met à jour les variables annee, mois, jour, heure, minute, seconde à partir du module RTC DS3231
 void updateDateTime() {
@@ -191,9 +192,9 @@ void initialisation_Interupt_externe() {
         if (millis() - t0 >= LONG_PRESS_MS) break;
         }
       if (millis() - t0 >= LONG_PRESS_MS) {
-        if (mode_actuel == MODE_STANDARD)        { mode_precedent = mode_actuel; mode_actuel = MODE_MAINTENANCE; }
-        else if (mode_actuel == MODE_ECONOMIQUE) { mode_precedent = mode_actuel; mode_actuel = MODE_STANDARD;    }
-        else if (mode_actuel == MODE_MAINTENANCE){ mode_actuel = (mode_precedent == MODE_ECONOMIQUE) ? MODE_ECONOMIQUE : MODE_STANDARD; }
+        if (mode_actuel == 0)        { mode_precedent = mode_actuel; mode_actuel = 3; }
+        else if (mode_actuel == 2) { mode_precedent = mode_actuel; mode_actuel = 0;    }
+        else if (mode_actuel == 3){ mode_actuel = (mode_precedent == 2) ? 2 : 1; }
       }
     }
   }  
@@ -205,8 +206,8 @@ void initialisation_Interupt_externe() {
         if (millis() - t0 >= LONG_PRESS_MS) break;
       }
       if (millis() - t0 >= LONG_PRESS_MS) {
-        if (mode_actuel == MODE_STANDARD)        { mode_precedent = mode_actuel; mode_actuel = MODE_ECONOMIQUE; }
-        else if (mode_actuel == MODE_ECONOMIQUE) { mode_precedent = mode_actuel; mode_actuel = MODE_STANDARD;    }
+        if (mode_actuel == 0)        { mode_precedent = mode_actuel; mode_actuel = 2; }
+        else if (mode_actuel == 2) { mode_precedent = mode_actuel; mode_actuel = 0;    }
       }
     }
   }
