@@ -193,8 +193,9 @@ void initialisation_Interupt_externe() {
         }
       if (millis() - t0 >= LONG_PRESS_MS) {
         if (mode_actuel == 0)        { mode_precedent = mode_actuel; mode_actuel = 3; }
-        else if (mode_actuel == 2) { mode_precedent = mode_actuel; mode_actuel = 0;    }
-        else if (mode_actuel == 3){ mode_actuel = (mode_precedent == 2) ? 2 : 1; }
+        else if (mode_actuel == 2) { mode_precedent = mode_actuel; mode_actuel = 3;    }
+        else if (mode_actuel == 3 && mode_precedent == 0){ mode_precedent = mode_actuel ; mode_actuel = 0 }
+        else if (mode_actuel == 3 && mode_precedent == 2){ mode_precedent = mode_actuel ; mode_actuel = 2 }
       }
     }
   }  
