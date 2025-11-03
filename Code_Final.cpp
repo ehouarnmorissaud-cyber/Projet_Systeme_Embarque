@@ -182,6 +182,12 @@ void setup() {
   // interruptions externes 
   attachInterrupts(digitalPinToInterrupt(PIN_BOUTON_ROUGE), bouton_rouge_presse, FALLING);
   attachInterrupts(digitalPinToInterrupt(PIN_BOUTON_VERT), bouton_vert_presse, FALLING);
+  if (digitalRead(PIN_BOUTON_ROUGE) == LOW) {
+    mode_actuel = 1
+  } else {
+    mode_actuel = 0 
+  }
+}
 
 void initialisation_Interupt_externe() {
   if (boutonRougeFlag) {
@@ -224,12 +230,6 @@ void initialisation_Interupt_timer() {
   TIMSK1 |= (1 << OCIE1A);
   interrupts();
 }   
-  if (digitalRead(PIN_BOUTON_ROUGE) == LOW) {
-    mode_actuel = 1
-  } else {
-    mode_actuel = 0 
-  }
-}
 
 // Initialisation du module RTC
   if (!rtc.begin()) {
