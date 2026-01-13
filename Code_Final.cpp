@@ -383,10 +383,10 @@ void loop() {
 
   unsigned long now = millis();
 
-  if (mode_actuel == 0 && now - dernierLog >= LOG_INTERVAL * 60000UL) {
-    dernierLog = now;
+  if (mode_actuel == 0 )
     modeStandard();
-  } else if (mode_actuel == 1) {
+  } else if (mode_actuel == 1&& now - dernierLog >= LOG_INTERVAL * 60000UL) {
+    dernierLog = now;) {
     modeConfig();
   } else if (mode_actuel == 2 && now - dernierLog >= LOG_INTERVAL * 2 * 60000UL) {
     dernierLog = now;
