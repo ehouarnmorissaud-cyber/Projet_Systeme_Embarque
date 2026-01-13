@@ -9,10 +9,10 @@
 
 #define PIN_LED_1 5
 #define PIN_LED_2 6
-#define PIN_BTN_V 2
-#define PIN_BTN_R 3
-#define PIN_LUM A0
-#define PIN_SD 4
+#define PIN_BOUTON_VERT 2
+#define PIN_BOUTON_ROUGE 3
+#define PIN_LUMIERE A0
+#define PIN_SD_CS 4
 
 RTC_DS3231 rtc;
 SoftwareSerial gpsSerial(8, 9);
@@ -20,262 +20,378 @@ TinyGPSPlus gps;
 BME280I2C bme;
 ChainableLED leds(PIN_LED_1, PIN_LED_2, 1);
 
-byte mode = 0, modePrev = 0;
-volatile bool btnR = false, btnV = false;
-bool sdOK = true;
+byte mode_actuel = 0;
+byte mode_precedent = 0;
 
-float temp, hum, pres;
-int lum;
-float lat, lon;
-int an, mo, jo, hr, mn, sc;
+volatile bool bouton_rouge_presse = false;
+volatile bool bouton_vert_presse = false;
 
+bool carteSD_presente = true;
+
+// Capteurs
+float temperature_air;
+float humidite;
+float pression_atmospherique;
+int luminosite;
+
+// GPS
+float latitude;
+float longitude;
+
+// RTC
+int annee, mois, jour, heure, minute, seconde;
+
+// Config réduite
 byte LUMIN_LOW = 255;
 int LUMIN_HIGH = 768;
-char MIN_TEMP = -10, MAX_TEMP = 60;
-int PRES_MIN = 850, PRES_MAX = 1080;
-byte LOG_INT = 10;
-int FILE_MAX = 4096;
+char MIN_TEMP_AIR = -10;
+char MAX_TEMP_AIR = 60;
+int PRESSURE_MIN = 850;
+int PRESSURE_MAX = 1080;
+byte LOG_INTERVAL = 10;
+int FILE_MAX_SIZE = 4096;
 
-unsigned long lastLog = 0;
-byte ledM = 0;
+unsigned long dernierLog = 0;
+byte modeLED = 0; // 0=off, 1=vert, 2=jaune, 3=bleu, 4=orange, 5+=erreurs
 
+// ============================================================================
 // LED
+// ============================================================================
+
 void gererLED(byte r1, byte g1, byte b1, byte r2, byte g2, byte b2, int d1, int d2) {
   unsigned long t = millis() % (d1 + d2);
   if (t < d1) leds.setColorRGB(0, r1, g1, b1);
   else leds.setColorRGB(0, r2, g2, b2);
 }
 
-void setLED(byte m) {
-  ledM = m;
-  if (m == 1) leds.setColorRGB(0, 0, 255, 0);
-  else if (m == 2) leds.setColorRGB(0, 255, 255, 0);
-  else if (m == 3) leds.setColorRGB(0, 0, 0, 255);
-  else if (m == 4) leds.setColorRGB(0, 255, 165, 0);
+void setLED(byte mode) {
+  modeLED = mode;
+  if (mode == 1) leds.setColorRGB(0, 0, 255, 0);        // VERT
+  else if (mode == 2) leds.setColorRGB(0, 255, 255, 0); // JAUNE
+  else if (mode == 3) leds.setColorRGB(0, 0, 0, 255);   // BLEU
+  else if (mode == 4) leds.setColorRGB(0, 255, 165, 0); // ORANGE
   else leds.setColorRGB(0, 0, 0, 0);
 }
 
 void updateLED() {
-  if (ledM == 5) gererLED(255, 0, 0, 0, 0, 255, 500, 500);
-  else if (ledM == 6) gererLED(255, 0, 0, 255, 255, 0, 500, 500);
-  else if (ledM == 7) gererLED(255, 0, 0, 0, 255, 0, 500, 500);
-  else if (ledM == 8) gererLED(255, 0, 0, 0, 255, 0, 333, 667);
-  else if (ledM == 10) gererLED(255, 0, 0, 255, 255, 255, 333, 667);
+  if (modeLED == 5) gererLED(255, 0, 0, 0, 0, 255, 500, 500);      // ROUGE-BLEU
+  else if (modeLED == 6) gererLED(255, 0, 0, 255, 255, 0, 500, 500);   // ROUGE-JAUNE
+  else if (modeLED == 7) gererLED(255, 0, 0, 0, 255, 0, 500, 500);     // ROUGE-VERT
+  else if (modeLED == 8) gererLED(255, 0, 0, 0, 255, 0, 333, 667);     // ROUGE-VERT LONG
+  else if (modeLED == 9) gererLED(255, 0, 0, 255, 255, 255, 500, 500); // ROUGE-BLANC
+  else if (modeLED == 10) gererLED(255, 0, 0, 255, 255, 255, 333, 667);// ROUGE-BLANC LONG
 }
 
+// ============================================================================
 // ISR
-void ISR_R() { btnR = true; }
-void ISR_V() { btnV = true; }
+// ============================================================================
+void ISR_bouton_rouge() { bouton_rouge_presse = true; }
+void ISR_bouton_vert() { bouton_vert_presse = true; }
 
-// Capteurs
-void updateTime() {
-  if (!rtc.begin()) { ledM = 5; return; }
+// ============================================================================
+// CAPTEURS
+// ============================================================================
+
+void updateDateTime() {
+  if (!rtc.begin()) {
+    Serial.println(F("ERREUR: RTC non detecte"));
+    modeLED = 5; // ROUGE-BLEU
+    return;
+  }
   DateTime now = rtc.now();
-  an = now.year(); mo = now.month(); jo = now.day();
-  hr = now.hour(); mn = now.minute(); sc = now.second();
+  annee = now.year();
+  mois = now.month();
+  jour = now.day();
+  heure = now.hour();
+  minute = now.minute();
+  seconde = now.second();
 }
 
 void updateSensors() {
   float t, h, p;
   bme.read(p, t, h, BME280::TempUnit_Celsius, BME280::PresUnit_Pa);
-  if (isnan(t) || isnan(h) || isnan(p)) { ledM = 7; return; }
-  if (t < -40 || t > 85 || h < 0 || h > 100) { ledM = 8; return; }
-  temp = t; hum = h; pres = p;
-  lum = analogRead(PIN_LUM);
+  
+  if (isnan(t) || isnan(h) || isnan(p)) {
+    Serial.println(F("ERREUR: Capteur BME280 inaccessible"));
+    modeLED = 7; // ROUGE-VERT
+    return;
+  }
+  
+  if (t < -40 || t > 85 || h < 0 || h > 100) {
+    Serial.println(F("ERREUR: Donnees capteur incoherentes"));
+    Serial.print(F("  Temp: ")); Serial.print(t);
+    Serial.print(F(" Hum: ")); Serial.println(h);
+    modeLED = 8; // ROUGE-VERT LONG
+    return;
+  }
+  
+  temperature_air = t;
+  humidite = h;
+  pression_atmospherique = p;
+  luminosite = analogRead(PIN_LUMIERE);
 }
 
 void getGPS() {
-  unsigned long start = millis();
-  while (millis() - start < 5000) {
+  unsigned long debut = millis();
+  while (millis() - debut < 5000) {
     while (gpsSerial.available()) gps.encode(gpsSerial.read());
     if (gps.location.isValid()) {
-      lat = gps.location.lat();
-      lon = gps.location.lng();
+      latitude = gps.location.lat();
+      longitude = gps.location.lng();
+      Serial.print(F("GPS OK: "));
+      Serial.print(latitude, 6);
+      Serial.print(F(", "));
+      Serial.println(longitude, 6);
       return;
     }
   }
-  lat = lon = 0;
-  ledM = 6;
+  Serial.println(F("ERREUR: GPS non disponible"));
+  latitude = 0;
+  longitude = 0;
+  modeLED = 6; // ROUGE-JAUNE
 }
 
-// GPS détaillé pour mode maintenance
-void afficherGPS() {
-  while (gpsSerial.available() > 0) {
-    gps.encode(gpsSerial.read());
-    if (gps.location.isUpdated()) {
-      Serial.print(F("L:")); Serial.print(gps.location.lat(), 6);
-      Serial.print(F(" ")); Serial.println(gps.location.lng(), 6);
-      if (gps.altitude.isValid()) {
-        Serial.print(F("A:")); Serial.println(gps.altitude.meters());
-      }
-      if (gps.speed.isValid()) {
-        Serial.print(F("V:")); Serial.println(gps.speed.kmph());
-      }
-      if (gps.satellites.isValid()) {
-        Serial.print(F("S:")); Serial.println(gps.satellites.value());
-      }
-    }
+void saveSD() {
+  if (!carteSD_presente) {
+    Serial.println(F("ERREUR: Carte SD absente"));
+    modeLED = 10;
+    return;
   }
-}
 
-// Sauvegarde
-void saveData() {
-  if (!sdOK) { ledM = 10; return; }
-  char fn[13];
-  int idx = 1;
+  char filename[13];
+  int index = 1;
   File f;
 
+  // Recherche du premier fichier disponible
   while (true) {
-    sprintf(fn, "D_%04d.LOG", idx);
-    if (!SD.exists(fn)) {
-      f = SD.open(fn, FILE_WRITE);
-      if (f) f.println(F("an,mo,jo,hr,mn,sc,temp,hum,pres,lum,lat,lon"));
+    sprintf(filename, "DATA_%04d.LOG", index);
+    if (!SD.exists(filename)) {
+      f = SD.open(filename, FILE_WRITE);
+      if (f) {
+        // En-tête CSV
+        f.println(F("annee,mois,jour,heure,minute,seconde,temp,lum,pression,lat,long"));
+      }
       break;
     }
-    f = SD.open(fn, FILE_WRITE);
-    if (f && f.size() < FILE_MAX) break;
+
+    f = SD.open(filename, FILE_WRITE);
+    if (f && f.size() < FILE_MAX_SIZE) break;
     if (f) f.close();
-    idx++;
-    if (idx > 9999) { ledM = 10; return; }
+    index++;
   }
 
-  if (!f) { ledM = 10; return; }
+  if (!f) {
+    Serial.println(F("ERREUR: impossible d'ouvrir fichier"));
+    modeLED = 10;
+    return;
+  }
 
-  f.print(an); f.print(',');
-  f.print(mo); f.print(',');
-  f.print(jo); f.print(',');
-  f.print(hr); f.print(',');
-  f.print(mn); f.print(',');
-  f.print(sc); f.print(',');
-  f.print(temp, 2); f.print(',');
-  f.print(hum, 1); f.print(',');
-  f.print(pres, 2); f.print(',');
-  f.print(lum); f.print(',');
-  f.print(lat, 6); f.print(',');
-  f.println(lon, 6);
+  // Écriture des données
+  f.print(annee); f.print(',');
+  f.print(mois); f.print(',');
+  f.print(jour); f.print(',');
+  f.print(heure); f.print(',');
+  f.print(minute); f.print(',');
+  f.print(seconde); f.print(',');
+  f.print(temperature_air); f.print(',');
+  f.print(luminosite); f.print(',');
+  f.print(pression_atmospherique); f.print(',');
+  f.print(latitude, 6); f.print(',');
+  f.println(longitude, 6);
+
   f.close();
+  Serial.print(F("Donnees sauvegardees dans "));
+  Serial.println(filename);
 }
 
+
+
 void checkButtons() {
-  if (btnR) {
-    btnR = false;
-    if (digitalRead(PIN_BTN_R) == LOW) {
+  if (bouton_rouge_presse) {
+    bouton_rouge_presse = false;
+    if (digitalRead(PIN_BOUTON_ROUGE) == LOW) {
       unsigned long t0 = millis();
-      while (digitalRead(PIN_BTN_R) == LOW && millis() - t0 < 5000);
+      while (digitalRead(PIN_BOUTON_ROUGE) == LOW && millis() - t0 < 5000);
+      
       if (millis() - t0 >= 5000) {
-        if (mode == 0 || mode == 2) {
-          modePrev = mode; mode = 3; setLED(4);
-        } else if (mode == 3) {
-          mode = modePrev; setLED(mode == 0 ? 1 : 3);
+        if (mode_actuel == 0 || mode_actuel == 2) {
+          mode_precedent = mode_actuel;
+          mode_actuel = 3;
+          setLED(4);
+          Serial.println(F("\n>>> Mode MAINTENANCE active"));
+        } else if (mode_actuel == 3) {
+          mode_actuel = mode_precedent;
+          setLED(mode_actuel == 0 ? 1 : 3);
+          if (mode_actuel == 0) Serial.println(F("\n>>> Retour Mode STANDARD"));
+          else Serial.println(F("\n>>> Retour Mode ECONOMIQUE"));
         }
       }
     }
   }
 
-  if (btnV) {
-    btnV = false;
-    if (digitalRead(PIN_BTN_V) == LOW) {
+  if (bouton_vert_presse) {
+    bouton_vert_presse = false;
+    if (digitalRead(PIN_BOUTON_VERT) == LOW) {
       unsigned long t0 = millis();
-      while (digitalRead(PIN_BTN_V) == LOW && millis() - t0 < 5000);
+      while (digitalRead(PIN_BOUTON_VERT) == LOW && millis() - t0 < 5000);
+      
       if (millis() - t0 >= 5000) {
-        if (mode == 0) { mode = 2; setLED(3); }
-        else if (mode == 2) { mode = 0; setLED(1); }
+        if (mode_actuel == 0) {
+          mode_actuel = 2;
+          setLED(3);
+          Serial.println(F("\n>>> Mode ECONOMIQUE active"));
+        } else if (mode_actuel == 2) {
+          mode_actuel = 0;
+          setLED(1);
+          Serial.println(F("\n>>> Mode STANDARD active"));
+        }
       }
     }
   }
 }
 
-// Modes
-void modeStd() {
+// ============================================================================
+// MODES
+// ============================================================================
+
+void modeStandard() {
   setLED(1);
-  updateTime();
+  Serial.println(F("\n=== MODE STANDARD ==="));
+  updateDateTime();
   updateSensors();
   getGPS();
-  saveData();
+  saveSD();
+  Serial.print(F("Temp: ")); Serial.print(temperature_air); Serial.println(F(" C"));
+  Serial.print(F("Hum: ")); Serial.print(humidite); Serial.println(F(" %"));
 }
 
-void modeCfg() {
+void modeConfig() {
   setLED(2);
   static unsigned long lastAct = millis();
   if (Serial.available()) {
     lastAct = millis();
+    Serial.println(F("Commande recue"));
     while (Serial.available()) Serial.read();
   }
-  if (millis() - lastAct > 1800000) mode = 0;
+  if (millis() - lastAct > 1800000) {
+    mode_actuel = 0;
+    Serial.println(F("\n>>> Timeout - Retour Mode STANDARD"));
+  }
 }
 
 void modeEco() {
   setLED(3);
-  updateTime();
+  Serial.println(F("\n=== MODE ECONOMIQUE ==="));
+  updateDateTime();
   updateSensors();
   static bool gpsOn = false;
   gpsOn = !gpsOn;
-  if (gpsOn) getGPS();
-  saveData();
+  if (gpsOn) {
+    getGPS();
+  } else {
+    Serial.println(F("GPS desactive (economie)"));
+  }
+  saveSD();
 }
 
 void modeMaint() {
   setLED(4);
   updateSensors();
-  Serial.print(F("T:")); Serial.print(temp);
-  Serial.print(F(" H:")); Serial.print(hum);
-  Serial.print(F(" P:")); Serial.print(pres);
-  Serial.print(F(" L:")); Serial.println(lum);
-  afficherGPS();
-  delay(100);
+  Serial.println(F("\n=== MODE MAINTENANCE ==="));
+  Serial.print(F("Temp: ")); Serial.print(temperature_air); Serial.println(F(" C"));
+  Serial.print(F("Hum: ")); Serial.print(humidite); Serial.println(F(" %"));
+  Serial.print(F("Pres: ")); Serial.print(pression_atmospherique); Serial.println(F(" Pa"));
+  Serial.print(F("Lumi: ")); Serial.println(luminosite);
+  delay(2000);
 }
+
+
 
 void setup() {
   Serial.begin(9600); 
   gpsSerial.begin(9600);
 
-  pinMode(PIN_BTN_R, INPUT_PULLUP);
-  pinMode(PIN_BTN_V, INPUT_PULLUP);
-  pinMode(PIN_LUM, INPUT);
+  pinMode(PIN_BOUTON_ROUGE, INPUT_PULLUP);
+  pinMode(PIN_BOUTON_VERT, INPUT_PULLUP);
+  pinMode(PIN_LUMIERE, INPUT);
 
-  attachInterrupt(digitalPinToInterrupt(PIN_BTN_R), ISR_R, FALLING);
-  attachInterrupt(digitalPinToInterrupt(PIN_BTN_V), ISR_V, FALLING);
+  attachInterrupt(digitalPinToInterrupt(PIN_BOUTON_ROUGE), ISR_bouton_rouge, FALLING);
+  attachInterrupt(digitalPinToInterrupt(PIN_BOUTON_VERT), ISR_bouton_vert, FALLING);
 
-  mode = (digitalRead(PIN_BTN_R) == LOW) ? 1 : 0;
-  setLED(mode == 1 ? 2 : 1);
+  if (digitalRead(PIN_BOUTON_ROUGE) == LOW) {
+    mode_actuel = 1;
+    setLED(2);
+    Serial.println(F("\n>>> DEMARRAGE EN MODE CONFIGURATION"));
+  } else {
+    mode_actuel = 0;
+    setLED(1);
+    Serial.println(F("\n>>> DEMARRAGE EN MODE STANDARD"));
+  }
 
-  if (!rtc.begin()) ledM = 5;
-  if (!bme.begin()) ledM = 7;
-  sdOK = SD.begin(PIN_SD);
-  if (!sdOK) ledM = 10;
-
-  // Test GPS simplifié
-  Serial.print(F("GPS..."));
-  unsigned long t = millis();
-  while (millis() - t < 5000) {
+  Serial.println(F("\n--- Verification composants ---"));
+  
+  if (!rtc.begin()) {
+    Serial.println(F("ERREUR: RTC non detecte"));
+    modeLED = 5;
+  } else {
+    Serial.println(F("OK: RTC"));
+  }
+  
+  if (!bme.begin()) {
+    Serial.println(F("ERREUR: BME280 non detecte"));
+    modeLED = 7;
+  } else {
+    Serial.println(F("OK: BME280"));
+  }
+  
+  carteSD_presente = SD.begin(PIN_SD_CS);
+  if (!carteSD_presente) {
+    Serial.println(F("ERREUR: Carte SD absente"));
+    modeLED = 10;
+  } else {
+    Serial.println(F("OK: Carte SD"));
+  }
+  
+  // Test GPS au démarrage
+  Serial.print(F("Test GPS..."));
+  unsigned long debut = millis();
+  bool gpsOK = false;
+  while (millis() - debut < 5000) {
     while (gpsSerial.available()) {
       gps.encode(gpsSerial.read());
       if (gps.location.isValid()) {
-        Serial.println(F("OK"));
-        Serial.print(gps.location.lat(), 6);
-        Serial.print(F(","));
-        Serial.println(gps.location.lng(), 6);
-        goto gps_ok;
+        gpsOK = true;
+        break;
       }
     }
+    if (gpsOK) break;
   }
-  Serial.println(F("?"));
-  gps_ok:
-  Serial.println(F("Pret"));
+  
+  if (gpsOK) {
+    Serial.println(F(" OK: GPS"));
+  } else {
+    Serial.println(F(" ATTENTION: GPS non disponible"));
+  }
+  
+  Serial.println(F("--- Systeme pret ---\n"));
 }
+
 
 void loop() {
   checkButtons();
   updateLED();
+
   unsigned long now = millis();
 
-  if (mode == 0 && now - lastLog >= LOG_INT * 60000UL) {
-    lastLog = now; modeStd();
-  } else if (mode == 1) {
-    modeCfg();
-  } else if (mode == 2 && now - lastLog >= LOG_INT * 2 * 60000UL) {
-    lastLog = now; modeEco();
-  } else if (mode == 3) {
+  if (mode_actuel == 0 && now - dernierLog >= LOG_INTERVAL * 60000UL) {
+    dernierLog = now;
+    modeStandard();
+  } else if (mode_actuel == 1) {
+    modeConfig();
+  } else if (mode_actuel == 2 && now - dernierLog >= LOG_INTERVAL * 2 * 60000UL) {
+    dernierLog = now;
+    modeEco();
+  } else if (mode_actuel == 3) {
     modeMaint();
   }
 
