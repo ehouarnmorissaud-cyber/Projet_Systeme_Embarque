@@ -51,6 +51,25 @@ int PRESSURE_MAX = 1080;
 byte LOG_INTERVAL = 10;
 int FILE_MAX_SIZE = 4096;
 
+//Config réinitialisation
+void resetConfiguration() {
+  LUMIN = 1;
+  LUMIN_LOW = 255;
+  LUMIN_HIGH = 768;
+  TEMP_AIR = 1;
+  MIN_TEMP_AIR = -10;
+  MAX_TEMP_AIR = 60;
+  HYGR = 1;
+  HYGR_MINT = 0;
+  HYGR_MAXT = 50;
+  PRESSURE = 1;
+  PRESSURE_MIN = 850;
+  PRESSURE_MAX = 1080;
+  LOG_INTERVAL = 10;
+  FILE_MAX_SIZE = 4096;
+  TIMEOUT = 30;
+}
+
 unsigned long dernierLog = 0;
 byte modeLED = 0; // 0=off, 1=vert, 2=jaune, 3=bleu, 4=orange, 5+=erreurs
 
@@ -271,9 +290,121 @@ void modeConfig() {
   if (Serial.available()) {
     lastAct = millis();
     Serial.println(F("Commande recue"));
-    while (Serial.available()) Serial.read();
+    String ligne = Serial.read(); // Récupère la ligne rédigée par l'utilisateur
+    byte indexEgal = stringeOne.indexOf('='); // Récupère l'index du "="
+    if (indexEgal != -1) { // Si on ne trouve pas de "=", la valeur de indexEgal se met automatiquement à -1
+      String commande = stringeOne.substring(0, indexEgal);
+      int valeur = stringeOne.substring(indexEgal + 1).toInt();
+      
+      // Traitement des différentes commandes
+      if (commande == "LUMIN" && (valeur == 0 || valeur == 1)) {
+        LUMIN = valeur;
+      }
+      else if (commande == "LUMIN_LOW" && valeur >= 0 && valeur <= 1023) {
+        if (valeur > LUMIN_HIGH) {
+          Serial.println("Erreur : LUMIN_LOW ne peut pas être supérieur à LUMIN_HIGH");
+        } 
+        else {
+          LUMIN_LOW = valeur;
+        }
+      }
+      else if (commande == "LUMIN_HIGH" && valeur >= 0 && valeur <= 1023) {
+        if (valeur < LUMIN_LOW)
+        {
+          Serial.println("Erreur : LUMIN_HIGH ne peut pas être inférieur à LUMIN_LOW");
+        }
+        else {
+        LUMIN_HIGH = valeur;
+        }
+      }
+      else if (commande == "TEMP_AIR" && (valeur == 0 || valeur == 1)) {
+        TEMP_AIR = valeur;
+      }
+      else if (commande == "MIN_TEMP_AIR" && valeur >= -40 && valeur <= 85) {
+        if (valeur > MAX_TEMP_AIR)
+        {
+          Serial.println("Erreur : MIN_TEMP_AIR ne peut pas être supérieur à MAX_TEMP_AIR");
+        }
+        else {
+        MIN_TEMP_AIR = valeur;
+        }
+      }
+      else if (commande == "MAX_TEMP_AIR" && valeur >= -40 && valeur <= 85) {
+        if (valeur < MIN_TEMP_AIR)
+        {
+          Serial.println("Erreur : MAX_TEMP_AIR ne peut pas être inférieur à MIN_TEMP_AIR");
+        }
+        else {
+        MAX_TEMP_AIR = valeur;
+        }
+      }
+      else if (commande == "HYGR" && (valeur == 0 || valeur == 1)) {
+        HYGR = valeur;
+      }
+      else if (commande == "HYGR_MINT" && valeur >= -40 && valeur <= 85) {
+        if (valeur > HYGR_MAXT)
+        {
+          Serial.println("Erreur : HYGR_MINT ne peut pas être supérieur à HYGR_MAXT");
+        }
+        else {
+        HYGR_MINT = valeur;
+        }
+      }
+      else if (commande == "HYGR_MAXT" && valeur >= -40 && valeur <= 85) {
+        if (valeur < HYGR_MINT)
+        {
+          Serial.println("Erreur : HYGR_MAXT ne peut pas être inférieur à HYGR_MINT");
+        }
+        else {
+        HYGR_MAXT = valeur;
+        }
+      }
+      else if (commande == "PRESSURE" && (valeur == 0 || valeur == 1)) {
+        PRESSURE = valeur;
+      }
+      else if (commande == "PRESSURE_MIN" && valeur >= 300 && valeur <= 1100) {
+        if (valeur > PRESSURE_MAX)
+        {
+          Serial.println("Erreur : PRESSURE_MIN ne peut pas être supérieur à PRESSURE_MAX");
+        }
+        else {  
+        PRESSURE_MIN = valeur;
+        }
+      }
+      else if (commande == "PRESSURE_MAX" && valeur >= 300 && valeur <= 1100) {
+        if (valeur < PRESSURE_MIN)
+        {
+          Serial.println("Erreur : PRESSURE_MAX ne peut pas être inférieur à PRESSURE_MIN");
+        }
+        else {
+        PRESSURE_MAX = valeur;
+        }
+      }
+      else if (commande == "LOG_INTERVAL" && valeur > 0) {
+        LOG_INTERVAL = valeur;
+      }
+      else if (commande == "FILE_MAX_SIZE" && valeur > 0) {
+        FILE_MAX_SIZE = valeur;
+      }
+      else if (commande == "TIMEOUT" && valeur > 0) {
+        TIMEOUT = valeur;
+      }
+      else {
+        Serial.print("La valeur rentrée est n'est pas correcte pour la commande "); Serial.println(commande);
+      }
+    }
+    else if (ligne == "VERSION"){
+      Serial.print("Version du logiciel embarqué : "); Serial.println(version_logiciel);
+    }
+    else if (ligne == "RESET"){
+      Serial.println("Réinitialisation de l’ensemble des paramètres à leurs valeurs par défaut.");
+      resetConfiguration();
+    }
+    else { // Si il n'y a eu aucun "=" dans la ligne, et que la valeur est donc à -1
+      Serial.println("La commande saisie n'est pas valide, merci d'utiliser le format suivant :'COMMANDE=VALEUR'");
+    }
   }
-  if (millis() - lastAct > 1800000) {
+  if (millis() - lastAct > 30000) {
     mode_actuel = 0;
     Serial.println(F("\n>>> Timeout - Retour Mode STANDARD"));
   }
@@ -376,24 +507,22 @@ void setup() {
   Serial.println(F("--- Systeme pret ---\n"));
 }
 
-
 void loop() {
   checkButtons();
   updateLED();
 
   unsigned long now = millis();
 
-  if (mode_actuel == 0 )
+  if (mode_actuel == 0 ){
     modeStandard();
-  } else if (mode_actuel == 1&& now - dernierLog >= LOG_INTERVAL * 60000UL) {
-    dernierLog = now;) {
+    } 
+  else if (mode_actuel == 1) {
     modeConfig();
-  } else if (mode_actuel == 2 && now - dernierLog >= LOG_INTERVAL * 2 * 60000UL) {
-    dernierLog = now;
+    } 
+  else if (mode_actuel == 2) {
     modeEco();
+    } 
   } else if (mode_actuel == 3) {
     modeMaint();
   }
-
-  delay(10);
 }
