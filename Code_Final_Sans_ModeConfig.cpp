@@ -41,40 +41,6 @@ float longitude;
 // RTC
 byte annee, mois, jour, heure, minute, seconde;
 
-// Config mode avec réduction
-uint16_t LUMIN_LOW = 255;
-uint16_t LUMIN_HIGH = 768;
-
-int8_t MIN_TEMP_AIR = -10;
-int8_t MAX_TEMP_AIR = 60;
-
-int8_t HYGR_MINT = 0;
-int8_t HYGR_MAXT = 50;
-
-int16_t PRESSURE_MIN = 850;
-int16_t PRESSURE_MAX = 1080;
-
-uint8_t LOG_INTERVAL = 10;
-uint16_t FILE_MAX_SIZE = 4096;
-uint16_t TIMEOUT = 30;
-byte version_logiciel = 2;
-
-//Config réinitialisation
-void resetConfiguration() {
-  LUMIN_LOW = 255;
-  LUMIN_HIGH = 768;
-  MIN_TEMP_AIR = -10;
-  MAX_TEMP_AIR = 60;
-  HYGR_MINT = 0;
-  HYGR_MAXT = 50;
-  PRESSURE_MIN = 850;
-  PRESSURE_MAX = 1080;
-  LOG_INTERVAL = 10;
-  FILE_MAX_SIZE = 4096;
-  TIMEOUT = 30;
-}
-
-uint8_t modeLED = 0; // 0=off, 1=vert, 2=jaune, 3=bleu, 4=orange, 5+=erreurs
 
 // ============================================================================
 // LED
@@ -89,7 +55,6 @@ void gererLED(byte r1, byte g1, byte b1, byte r2, byte g2, byte b2, int d1, int 
 void setLED(byte mode) {
   modeLED = mode;
   if (mode == 1) leds.setColorRGB(0, 0, 255, 0);        // VERT
-  else if (mode == 2) leds.setColorRGB(0, 255, 255, 0); // JAUNE
   else if (mode == 3) leds.setColorRGB(0, 0, 0, 255);   // BLEU
   else if (mode == 4) leds.setColorRGB(0, 255, 165, 0); // ORANGE
   else leds.setColorRGB(0, 0, 0, 0);
@@ -267,128 +232,7 @@ void modeStandard() {
   Serial.print(F("Hum: ")); Serial.print(humidite); Serial.println(F(" %"));
 }
 
-void modeConfig() {
-  setLED(2);
-  static unsigned long lastAct = millis();
 
-  if (Serial.available() != NULL) {
-    lastAct = millis();
-    Serial.println(F("Commande recue"));
-
-    char ligne[26];
-    char commande[15];
-
-    uint8_t dernier = Serial.readBytesUntil('\n', ligne, sizeof(ligne) - 1); //dernier prend pour valeur le nb de caractère & ligne prend pour valeur ce qui a été écrit.
-    ligne[dernier] = "\0"; // Modifie la valeur du retour à la ligne par un caractère vide
-
-    char* egal = strchr(ligne, "=");
-
-    if (egal) {
-      *egal = "\0";
-      strcpy(commande, ligne);
-      int16_t valeur = atoi(egal + 1);
-      
-      if (commande == "LUMIN_LOW" && valeur >= 0 && valeur <= 1023) {
-        if (valeur > LUMIN_HIGH) {
-          Serial.println("Erreur : LUMIN_LOW ne peut pas être supérieur à LUMIN_HIGH");
-        } 
-        else {
-          LUMIN_LOW = valeur;
-        }
-      }
-      else if (commande == "LUMIN_HIGH" && valeur >= 0 && valeur <= 1023) {
-        if (valeur < LUMIN_LOW)
-        {
-          Serial.println("Erreur : LUMIN_HIGH ne peut pas être inférieur à LUMIN_LOW");
-        }
-        else {
-        LUMIN_HIGH = valeur;
-        }
-      }
-      else if (commande == "MIN_TEMP_AIR" && valeur >= -40 && valeur <= 85) {
-        if (valeur > MAX_TEMP_AIR)
-        {
-          Serial.println("Erreur : MIN_TEMP_AIR ne peut pas être supérieur à MAX_TEMP_AIR");
-        }
-        else {
-        MIN_TEMP_AIR = valeur;
-        }
-      }
-      else if (commande == "MAX_TEMP_AIR" && valeur >= -40 && valeur <= 85) {
-        if (valeur < MIN_TEMP_AIR)
-        {
-          Serial.println("Erreur : MAX_TEMP_AIR ne peut pas être inférieur à MIN_TEMP_AIR");
-        }
-        else {
-        MAX_TEMP_AIR = valeur;
-        }
-      }
-      else if (commande == "HYGR_MINT" && valeur >= -40 && valeur <= 85) {
-        if (valeur > HYGR_MAXT)
-        {
-          Serial.println("Erreur : HYGR_MINT ne peut pas être supérieur à HYGR_MAXT");
-        }
-        else {
-        HYGR_MINT = valeur;
-        }
-      }
-      else if (commande == "HYGR_MAXT" && valeur >= -40 && valeur <= 85) {
-        if (valeur < HYGR_MINT)
-        {
-          Serial.println("Erreur : HYGR_MAXT ne peut pas être inférieur à HYGR_MINT");
-        }
-        else {
-        HYGR_MAXT = valeur;
-        }
-      }
-      else if (commande == "PRESSURE_MIN" && valeur >= 300 && valeur <= 1100) {
-        if (valeur > PRESSURE_MAX)
-        {
-          Serial.println("Erreur : PRESSURE_MIN ne peut pas être supérieur à PRESSURE_MAX");
-        }
-        else {  
-        PRESSURE_MIN = valeur;
-        }
-      }
-      else if (commande == "PRESSURE_MAX" && valeur >= 300 && valeur <= 1100) {
-        if (valeur < PRESSURE_MIN)
-        {
-          Serial.println("Erreur : PRESSURE_MAX ne peut pas être inférieur à PRESSURE_MIN");
-        }
-        else {
-        PRESSURE_MAX = valeur;
-        }
-      }
-      else if (commande == "LOG_INTERVAL" && valeur > 0) {
-        LOG_INTERVAL = valeur;
-      }
-      else if (commande == "FILE_MAX_SIZE" && valeur > 0) {
-        FILE_MAX_SIZE = valeur;
-      }
-      else if (commande == "TIMEOUT" && valeur > 0) {
-        TIMEOUT = valeur;
-      }
-      else {
-        Serial.print("La valeur rentrée est n'est pas correcte pour la commande "); Serial.println(commande);
-      }
-    }
-    else if (ligne == "VERSION"){
-      Serial.print("Version du logiciel embarqué : "); 
-      Serial.println(version_logiciel);
-    }
-    else if (ligne == "RESET"){
-      Serial.println("Réinitialisation de l’ensemble des paramètres à leurs valeurs par défaut.");
-      resetConfiguration();
-    }
-    else { // Si il n'y a eu aucun "=" dans la ligne, et que la valeur est donc à -1
-      Serial.println("La commande saisie n'est pas valide, merci d'utiliser le format suivant :'COMMANDE=VALEUR'");
-    }
-  }
-  if (millis() - lastAct > 30000) {
-    mode_actuel = 0;
-    Serial.println(F("\n>>> Timeout - Retour Mode STANDARD"));
-  }
-}
 
 void modeEco() {
   setLED(3);
@@ -473,15 +317,7 @@ void setup() {
   
   Serial.println(F("--- Systeme pret ---\n"));
 
-  if (digitalRead(PIN_BOUTON_ROUGE) == LOW) {
-    mode_actuel = 1;
-    setLED(2);
-    Serial.println(F("\n>>> DEMARRAGE EN MODE CONFIGURATION"));
-  } else {
-    mode_actuel = 0;
-    setLED(1);
-    Serial.println(F("\n>>> DEMARRAGE EN MODE STANDARD"));
-  }
+ 
 
   attachInterrupt(digitalPinToInterrupt(PIN_BOUTON_ROUGE), ISR_bouton_rouge, FALLING);
   attachInterrupt(digitalPinToInterrupt(PIN_BOUTON_VERT), ISR_bouton_vert, FALLING);
@@ -497,9 +333,7 @@ void loop() {
   if (mode_actuel == 0 ){
     modeStandard();
     } 
-  else if (mode_actuel == 1) {
-    modeConfig();
-    } 
+ 
   else if (mode_actuel == 2) {
     modeEco();
     } 
