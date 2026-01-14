@@ -19,6 +19,7 @@ SoftwareSerial gpsSerial(8, 9);
 TinyGPSPlus gps;
 BME280I2C bme;
 ChainableLED leds(PIN_LED_1, PIN_LED_2, 1);
+File fichier ;
 
 byte mode_actuel = 0;
 byte mode_precedent = 0;
@@ -39,17 +40,26 @@ float latitude;
 float longitude;
 
 // RTC
-int annee, mois, jour, heure, minute, seconde;
+int annee;
+byte mois, jour, heure, minute, seconde;
 
 // Config réduite
+bool LUMIN = 1;
 byte LUMIN_LOW = 255;
 int LUMIN_HIGH = 768;
+bool TEMP_AIR = 1;
 char MIN_TEMP_AIR = -10;
 char MAX_TEMP_AIR = 60;
+bool HYGR = 1;
+int HYGR_MINT = 0;
+int HYGR_MAXT = 50;
+bool PRESSURE = 1;
 int PRESSURE_MIN = 850;
 int PRESSURE_MAX = 1080;
 byte LOG_INTERVAL = 10;
 int FILE_MAX_SIZE = 4096;
+int TIMEOUT = 30;
+byte version_logiciel = 2;
 
 //Config réinitialisation
 void resetConfiguration() {
@@ -171,56 +181,35 @@ void getGPS() {
 }
 
 void saveSD() {
-  if (!carteSD_presente) {
+  if (carteSD_presente) {
+    char nomFichier[25];
+    sprintf(
+      nomFichier,
+      "%04d%02d%02d_%02d%02d%02d.LOG",
+      annee,
+      mois,
+      jour,
+      heure,
+      minute,
+      seconde
+    );
+
+    fichier = SD.open( nomFichier, FILE_WRITE);
+
+    if (fichier){
+      fichier.print("TEMP : "); fichier.println(temperature_air);
+      fichier.print("HUM : "); fichier.println(humidite);
+      fichier.print("PRESS : "); fichier.println(pression_atmospherique);
+      fichier.print("LUM : "); fichier.println(luminosite);
+      fichier.print("CO : "); fichier.println(longitude, latitude);
+      fichier.close();
+    }
+  }
+  else
+  {
     Serial.println(F("ERREUR: Carte SD absente"));
     modeLED = 10;
-    return;
   }
-
-  char filename[13];
-  int index = 1;
-  File f;
-
-  // Recherche du premier fichier disponible
-  while (true) {
-    sprintf(filename, "DATA_%04d.LOG", index);
-    if (!SD.exists(filename)) {
-      f = SD.open(filename, FILE_WRITE);
-      if (f) {
-        // En-tête CSV
-        f.println(F("annee,mois,jour,heure,minute,seconde,temp,lum,pression,lat,long"));
-      }
-      break;
-    }
-
-    f = SD.open(filename, FILE_WRITE);
-    if (f && f.size() < FILE_MAX_SIZE) break;
-    if (f) f.close();
-    index++;
-  }
-
-  if (!f) {
-    Serial.println(F("ERREUR: impossible d'ouvrir fichier"));
-    modeLED = 10;
-    return;
-  }
-
-  // Écriture des données
-  f.print(annee); f.print(',');
-  f.print(mois); f.print(',');
-  f.print(jour); f.print(',');
-  f.print(heure); f.print(',');
-  f.print(minute); f.print(',');
-  f.print(seconde); f.print(',');
-  f.print(temperature_air); f.print(',');
-  f.print(luminosite); f.print(',');
-  f.print(pression_atmospherique); f.print(',');
-  f.print(latitude, 6); f.print(',');
-  f.println(longitude, 6);
-
-  f.close();
-  Serial.print(F("Donnees sauvegardees dans "));
-  Serial.println(filename);
 }
 
 
@@ -287,14 +276,19 @@ void modeStandard() {
 void modeConfig() {
   setLED(2);
   static unsigned long lastAct = millis();
-  if (Serial.available()) {
+
+  if (Serial.available() != NULL) {
     lastAct = millis();
     Serial.println(F("Commande recue"));
-    String ligne = Serial.read(); // Récupère la ligne rédigée par l'utilisateur
-    byte indexEgal = stringeOne.indexOf('='); // Récupère l'index du "="
+
+    String ligne = Serial.readStringUntil('\n'); // Récupère la ligne rédigée par l'utilisateur
+    ligne.trim(); // enlève \r et espaces
+
+    byte indexEgal = ligne.indexOf('='); // Récupère l'index du "="
+
     if (indexEgal != -1) { // Si on ne trouve pas de "=", la valeur de indexEgal se met automatiquement à -1
-      String commande = stringeOne.substring(0, indexEgal);
-      int valeur = stringeOne.substring(indexEgal + 1).toInt();
+      String commande = ligne.substring(0, indexEgal);
+      int valeur = ligne.substring(indexEgal + 1).toInt();
       
       // Traitement des différentes commandes
       if (commande == "LUMIN" && (valeur == 0 || valeur == 1)) {
@@ -394,7 +388,8 @@ void modeConfig() {
       }
     }
     else if (ligne == "VERSION"){
-      Serial.print("Version du logiciel embarqué : "); Serial.println(version_logiciel);
+      Serial.print("Version du logiciel embarqué : "); 
+      Serial.println(version_logiciel);
     }
     else if (ligne == "RESET"){
       Serial.println("Réinitialisation de l’ensemble des paramètres à leurs valeurs par défaut.");
@@ -523,7 +518,7 @@ void loop() {
   else if (mode_actuel == 2) {
     modeEco();
     } 
-  } else if (mode_actuel == 3) {
+  else if (mode_actuel == 3) {
     modeMaint();
   }
 }
