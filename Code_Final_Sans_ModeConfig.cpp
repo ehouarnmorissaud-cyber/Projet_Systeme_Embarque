@@ -22,6 +22,7 @@ ChainableLED leds(PIN_LED_1, PIN_LED_2, 1);
 
 uint8_t mode_actuel = 0;
 uint8_t mode_precedent = 0;
+uint8_t modeLED = 0;
 
 volatile bool bouton_rouge_presse = false;
 volatile bool bouton_vert_presse = false;
@@ -29,10 +30,10 @@ volatile bool bouton_vert_presse = false;
 bool carteSD_presente = true;
 
 // Capteurs
-int8_t temperature_air;
-int8_t humidite;
-int16_t pression_atmospherique;
-uint16_t luminosite;
+float temperature_air;
+float humidite;
+float pression_atmospherique;
+float luminosite;
 
 // GPS
 float latitude;
