@@ -208,7 +208,7 @@ void saveSD() {
   else
   {
     Serial.println(F("ERREUR: Carte SD absente"));
-    modeLED = 10;
+    modeLED = 9;
   }
 }
 
@@ -460,7 +460,7 @@ void setup() {
   carteSD_presente = SD.begin(PIN_SD_CS);
   if (!carteSD_presente) {
     Serial.println(F("ERREUR: Carte SD absente"));
-    modeLED = 10;
+    modeLED = 9;
   } else {
     Serial.println(F("OK: Carte SD"));
   }
