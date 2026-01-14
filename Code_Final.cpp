@@ -1,506 +1,979 @@
-#include <Wire.h>
-#include <RTClib.h>
-#include <SoftwareSerial.h>
-#include <TinyGPS++.h>
-#include <SPI.h>
-#include <SD.h>
 #include <ChainableLED.h>
+
 #include <BME280I2C.h>
 
-#define PIN_LED_1 5
-#define PIN_LED_2 6
-#define PIN_BOUTON_VERT 2
-#define PIN_BOUTON_ROUGE 3
-#define PIN_LUMIERE A0
-#define PIN_SD_CS 4
+#include <Wire.h>
+
+#include <SoftwareSerial.h>
+
+#include <RTClib.h>
+
+#include <EEPROM.h>
+
+#include <SPI.h>
+
+#include <SD.h>
+
+
+
+// === PINS ===
+
+#define PIN_LED_DATA 5
+
+#define PIN_LED_CLK 6
+
+#define PIN_LED_CNT 1
+
+#define RED_BUTTON 2
+
+#define GREEN_BUTTON 3
+
+#define SD_CS 4
+
+#define LIGHT_SENSOR A0
+
+
+
+// === HARDWARE OBJECTS ===
+
+BME280I2C bme;
 
 RTC_DS3231 rtc;
-SoftwareSerial gpsSerial(8, 9);
-TinyGPSPlus gps;
-BME280I2C bme;
-ChainableLED leds(PIN_LED_1, PIN_LED_2, 1);
 
-uint8_t mode_actuel = 0;
-uint8_t mode_precedent = 0;
+ChainableLED leds(PIN_LED_DATA, PIN_LED_CLK, PIN_LED_CNT);
 
-volatile bool bouton_rouge_presse = false;
-volatile bool bouton_vert_presse = false;
-
-bool carteSD_presente = true;
-
-// Capteurs
-int8_t temperature_air;
-int8_t humidite;
-int16_t pression_atmospherique;
-uint16_t luminosite;
-
-// GPS
-float latitude;
-float longitude;
-
-// RTC
-byte annee, mois, jour, heure, minute, seconde;
-
-// Config mode avec réduction
-uint16_t LUMIN_LOW = 255;
-uint16_t LUMIN_HIGH = 768;
-
-int8_t MIN_TEMP_AIR = -10;
-int8_t MAX_TEMP_AIR = 60;
-
-int8_t HYGR_MINT = 0;
-int8_t HYGR_MAXT = 50;
-
-int16_t PRESSURE_MIN = 850;
-int16_t PRESSURE_MAX = 1080;
-
-uint8_t LOG_INTERVAL = 10;
-uint16_t FILE_MAX_SIZE = 4096;
-uint16_t TIMEOUT = 30;
-byte version_logiciel = 2;
-
-//Config réinitialisation
-void resetConfiguration() {
-  LUMIN_LOW = 255;
-  LUMIN_HIGH = 768;
-  MIN_TEMP_AIR = -10;
-  MAX_TEMP_AIR = 60;
-  HYGR_MINT = 0;
-  HYGR_MAXT = 50;
-  PRESSURE_MIN = 850;
-  PRESSURE_MAX = 1080;
-  LOG_INTERVAL = 10;
-  FILE_MAX_SIZE = 4096;
-  TIMEOUT = 30;
-}
-
-uint8_t modeLED = 0; // 0=off, 1=vert, 2=jaune, 3=bleu, 4=orange, 5+=erreurs
-
-// ============================================================================
-// LED
-// ============================================================================
-
-void gererLED(byte r1, byte g1, byte b1, byte r2, byte g2, byte b2, int d1, int d2) {
-  unsigned long t = millis() % (d1 + d2);
-  if (t < d1) leds.setColorRGB(0, r1, g1, b1);
-  else leds.setColorRGB(0, r2, g2, b2);
-}
-
-void setLED(byte mode) {
-  modeLED = mode;
-  if (mode == 1) leds.setColorRGB(0, 0, 255, 0);        // VERT
-  else if (mode == 2) leds.setColorRGB(0, 255, 255, 0); // JAUNE
-  else if (mode == 3) leds.setColorRGB(0, 0, 0, 255);   // BLEU
-  else if (mode == 4) leds.setColorRGB(0, 255, 165, 0); // ORANGE
-  else leds.setColorRGB(0, 0, 0, 0);
-}
-
-void updateLED() {
-  if (modeLED == 5) gererLED(255, 0, 0, 0, 0, 255, 500, 500);      // ROUGE-BLEU
-  else if (modeLED == 6) gererLED(255, 0, 0, 255, 255, 0, 500, 500);   // ROUGE-JAUNE
-  else if (modeLED == 7) gererLED(255, 0, 0, 0, 255, 0, 500, 500);     // ROUGE-VERT
-  else if (modeLED == 8) gererLED(255, 0, 0, 0, 255, 0, 333, 667);     // ROUGE-VERT LONG
-  else if (modeLED == 9) gererLED(255, 0, 0, 255, 255, 255, 500, 500); // ROUGE-BLANC
-  else if (modeLED == 10) gererLED(255, 0, 0, 255, 255, 255, 333, 667);// ROUGE-BLANC LONG
-}
-
-// ============================================================================
-// ISR
-// ============================================================================
-void ISR_bouton_rouge() { bouton_rouge_presse = true; }
-void ISR_bouton_vert() { bouton_vert_presse = true; }
-
-// ============================================================================
-// CAPTEURS
-// ============================================================================
-
-void updateDateTime() {
-  if (!rtc.begin()) {
-    Serial.println(F("ERREUR: RTC non detecte"));
-    modeLED = 5; // ROUGE-BLEU
-    return;
-  }
-  DateTime now = rtc.now();
-  annee = now.year();
-  mois = now.month();
-  jour = now.day();
-  heure = now.hour();
-  minute = now.minute();
-  seconde = now.second();
-}
-
-void updateSensors() {
-  float t, h, p;
-  bme.read(p, t, h, BME280::TempUnit_Celsius, BME280::PresUnit_Pa);
-  
-  if (isnan(t) || isnan(h) || isnan(p)) {
-    Serial.println(F("ERREUR: Capteur BME280 inaccessible"));
-    modeLED = 7; // ROUGE-VERT
-    return;
-  }
-  
-  if (t < -40 || t > 85 || h < 0 || h > 100) {
-    Serial.println(F("ERREUR: Donnees capteur incoherentes"));
-    Serial.print(F("  Temp: ")); Serial.print(t);
-    Serial.print(F(" Hum: ")); Serial.println(h);
-    modeLED = 8; // ROUGE-VERT LONG
-    return;
-  }
-  
-  temperature_air = (int)t;
-  humidite = (int)h;
-  pression_atmospherique = (int)p;
-  luminosite = analogRead(PIN_LUMIERE);
-}
-
-void getGPS() {
-  unsigned long debut = millis();
-  while (millis() - debut < 5000) {
-    while (gpsSerial.available()) gps.encode(gpsSerial.read());
-    if (gps.location.isValid()) {
-      latitude = gps.location.lat();
-      longitude = gps.location.lng();
-      Serial.print(F("GPS OK: "));
-      Serial.print(latitude, 6);
-      Serial.print(F(", "));
-      Serial.println(longitude, 6);
-      return;
-    }
-  }
-  Serial.println(F("ERREUR: GPS non disponible"));
-  latitude = 0;
-  longitude = 0;
-  modeLED = 6; // ROUGE-JAUNE
-}
-
-void saveSD() {
-  File fichier ;
-  if (carteSD_presente) {
-    char nomFichier[20];
-    sprintf(
-      nomFichier,
-      "%02d%02d%02d_%02d%02d%02d.LOG",
-      annee,
-      mois,
-      jour,
-      heure,
-      minute,
-      seconde
-    );
-
-    fichier = SD.open( nomFichier, FILE_WRITE);
-
-    if (fichier){
-      fichier.print("TEMP : "); fichier.println(temperature_air);
-      fichier.print("HUM : "); fichier.println(humidite);
-      fichier.print("PRESS : "); fichier.println(pression_atmospherique);
-      fichier.print("LUM : "); fichier.println(luminosite);
-      fichier.print("CO : "); fichier.println(longitude, latitude);
-      fichier.close();
-    }
-  }
-  else
-  {
-    Serial.println(F("ERREUR: Carte SD absente"));
-    modeLED = 10;
-  }
-}
+SoftwareSerial SoftSerial(8, 9); // GPS
 
 
 
-void checkButtons() {
-  if (bouton_rouge_presse) {
-    bouton_rouge_presse = false;
-    if (digitalRead(PIN_BOUTON_ROUGE) == LOW) {
-      unsigned long t0 = millis();
-      while (digitalRead(PIN_BOUTON_ROUGE) == LOW && millis() - t0 < 5000);
-      
-      if (millis() - t0 >= 5000) {
-        if (mode_actuel == 0 || mode_actuel == 2) {
-          mode_precedent = mode_actuel;
-          mode_actuel = 3;
-          setLED(4);
-          Serial.println(F("\n>>> Mode MAINTENANCE active"));
-        } else if (mode_actuel == 3) {
-          mode_actuel = mode_precedent;
-          setLED(mode_actuel == 0 ? 1 : 3);
-          if (mode_actuel == 0) Serial.println(F("\n>>> Retour Mode STANDARD"));
-          else Serial.println(F("\n>>> Retour Mode ECONOMIQUE"));
-        }
-      }
-    }
-  }
+// === EEPROM ADDRESSES ===
 
-  if (bouton_vert_presse) {
-    bouton_vert_presse = false;
-    if (digitalRead(PIN_BOUTON_VERT) == LOW) {
-      unsigned long t0 = millis();
-      while (digitalRead(PIN_BOUTON_VERT) == LOW && millis() - t0 < 5000);
-      
-      if (millis() - t0 >= 5000) {
-        if (mode_actuel == 0) {
-          mode_actuel = 2;
-          setLED(3);
-          Serial.println(F("\n>>> Mode ECONOMIQUE active"));
-        } else if (mode_actuel == 2) {
-          mode_actuel = 0;
-          setLED(1);
-          Serial.println(F("\n>>> Mode STANDARD active"));
-        }
-      }
-    }
-  }
-}
+#define EEPROM_LOG_INTERVAL_ADDR 0
 
-// ============================================================================
-// MODES
-// ============================================================================
+#define EEPROM_FILE_MAX_SIZE_ADDR 1
 
-void modeStandard() {
-  setLED(1);
-  Serial.println(F("\n=== MODE STANDARD ==="));
-  updateDateTime();
-  updateSensors();
-  getGPS();
-  saveSD();
-  Serial.print(F("Temp: ")); Serial.print(temperature_air); Serial.println(F(" C"));
-  Serial.print(F("Hum: ")); Serial.print(humidite); Serial.println(F(" %"));
-}
+#define EEPROM_TIMEOUT_ADDR 3
 
-void modeConfig() {
-  setLED(2);
-  static unsigned long lastAct = millis();
+#define EEPROM_LUMIN_ADDR 4
 
-  if (Serial.available() != NULL) {
-    lastAct = millis();
-    Serial.println(F("Commande recue"));
+#define EEPROM_LUMIN_LOW_ADDR 5
+
+#define EEPROM_LUMIN_HIGH_ADDR 7
+
+#define EEPROM_TEMP_AIR_ADDR 9
+
+#define EEPROM_MIN_TEMP_AIR_ADDR 10
+
+#define EEPROM_MAX_TEMP_AIR_ADDR 12
+
+#define EEPROM_HYGR_ADDR 14
+
+#define EEPROM_HYGR_MINT_ADDR 15
+
+#define EEPROM_HYGR_MAXT_ADDR 17
+
+#define EEPROM_PRESSURE_ADDR 19
+
+#define EEPROM_PRESSURE_MIN_ADDR 20
+
+#define EEPROM_PRESSURE_MAX_ADDR 22
+
+#define EEPROM_COMPT_FICH 23
 
 
-    String ligne = Serial.readStringUntil('\n'); // Récupère la ligne rédigée par l'utilisateur
-    ligne.trim(); // enlève \r et espaces
 
-    byte indexEgal = ligne.indexOf('='); // Récupère l'index du "="
+// === DEFAULTS ===
 
-    if (indexEgal != -1) { // Si on ne trouve pas de "=", la valeur de indexEgal se met automatiquement à -1
-      String commande = ligne.substring(0, indexEgal);
-      int valeur = ligne.substring(indexEgal + 1).toInt();
-      
-      if (commande == "LUMIN_LOW" && valeur >= 0 && valeur <= 1023) {
-        if (valeur > LUMIN_HIGH) {
-          Serial.println("Erreur : LUMIN_LOW ne peut pas être supérieur à LUMIN_HIGH");
-        } 
-        else {
-          LUMIN_LOW = valeur;
-        }
-      }
-      else if (commande == "LUMIN_HIGH" && valeur >= 0 && valeur <= 1023) {
-        if (valeur < LUMIN_LOW)
-        {
-          Serial.println("Erreur : LUMIN_HIGH ne peut pas être inférieur à LUMIN_LOW");
-        }
-        else {
-        LUMIN_HIGH = valeur;
-        }
-      }
-      else if (commande == "MIN_TEMP_AIR" && valeur >= -40 && valeur <= 85) {
-        if (valeur > MAX_TEMP_AIR)
-        {
-          Serial.println("Erreur : MIN_TEMP_AIR ne peut pas être supérieur à MAX_TEMP_AIR");
-        }
-        else {
-        MIN_TEMP_AIR = valeur;
-        }
-      }
-      else if (commande == "MAX_TEMP_AIR" && valeur >= -40 && valeur <= 85) {
-        if (valeur < MIN_TEMP_AIR)
-        {
-          Serial.println("Erreur : MAX_TEMP_AIR ne peut pas être inférieur à MIN_TEMP_AIR");
-        }
-        else {
-        MAX_TEMP_AIR = valeur;
-        }
-      }
-      else if (commande == "HYGR_MINT" && valeur >= -40 && valeur <= 85) {
-        if (valeur > HYGR_MAXT)
-        {
-          Serial.println("Erreur : HYGR_MINT ne peut pas être supérieur à HYGR_MAXT");
-        }
-        else {
-        HYGR_MINT = valeur;
-        }
-      }
-      else if (commande == "HYGR_MAXT" && valeur >= -40 && valeur <= 85) {
-        if (valeur < HYGR_MINT)
-        {
-          Serial.println("Erreur : HYGR_MAXT ne peut pas être inférieur à HYGR_MINT");
-        }
-        else {
-        HYGR_MAXT = valeur;
-        }
-      }
-      else if (commande == "PRESSURE_MIN" && valeur >= 300 && valeur <= 1100) {
-        if (valeur > PRESSURE_MAX)
-        {
-          Serial.println("Erreur : PRESSURE_MIN ne peut pas être supérieur à PRESSURE_MAX");
-        }
-        else {  
-        PRESSURE_MIN = valeur;
-        }
-      }
-      else if (commande == "PRESSURE_MAX" && valeur >= 300 && valeur <= 1100) {
-        if (valeur < PRESSURE_MIN)
-        {
-          Serial.println("Erreur : PRESSURE_MAX ne peut pas être inférieur à PRESSURE_MIN");
-        }
-        else {
-        PRESSURE_MAX = valeur;
-        }
-      }
-      else if (commande == "LOG_INTERVAL" && valeur > 0) {
-        LOG_INTERVAL = valeur;
-      }
-      else if (commande == "FILE_MAX_SIZE" && valeur > 0) {
-        FILE_MAX_SIZE = valeur;
-      }
-      else if (commande == "TIMEOUT" && valeur > 0) {
-        TIMEOUT = valeur;
-      }
-      else {
-        Serial.print("La valeur rentrée est n'est pas correcte pour la commande "); Serial.println(commande);
-      }
-    }
-    else if (ligne == "VERSION"){
-      Serial.print("Version du logiciel embarqué : "); 
-      Serial.println(version_logiciel);
-    }
-    else if (ligne == "RESET"){
-      Serial.println("Réinitialisation de l’ensemble des paramètres à leurs valeurs par défaut.");
-      resetConfiguration();
-    }
-    else { // Si il n'y a eu aucun "=" dans la ligne, et que la valeur est donc à -1
-      Serial.println("La commande saisie n'est pas valide, merci d'utiliser le format suivant :'COMMANDE=VALEUR'");
-    }
-  }
-  if (millis() - lastAct > 30000) {
-    mode_actuel = 0;
-    Serial.println(F("\n>>> Timeout - Retour Mode STANDARD"));
-  }
-}
+const uint8_t DEF_LOG_INTERVAL = 10;
 
-void modeEco() {
-  setLED(3);
-  Serial.println(F("\n=== MODE ECONOMIQUE ==="));
-  updateDateTime();
-  updateSensors();
-  static bool gpsOn = false;
-  gpsOn = !gpsOn;
-  if (gpsOn) {
-    getGPS();
-  } else {
-    Serial.println(F("GPS desactive (economie)"));
-  }
-  saveSD();
-}
+const uint16_t DEF_FILE_MAX_SIZE = 2048;
 
-void modeMaint() {
-  setLED(4);
-  updateSensors();
-  Serial.println(F("\n=== MODE MAINTENANCE ==="));
-  Serial.print(F("Temp: ")); Serial.print(temperature_air); Serial.println(F(" C"));
-  Serial.print(F("Hum: ")); Serial.print(humidite); Serial.println(F(" %"));
-  Serial.print(F("Pres: ")); Serial.print(pression_atmospherique); Serial.println(F(" Pa"));
-  Serial.print(F("Lumi: ")); Serial.println(luminosite);
-  delay(2000);
-}
+const uint8_t DEF_TIMEOUT = 30;
+
+const uint8_t DEF_LUMIN = 1;
+
+const uint16_t DEF_LUMIN_LOW = 255;
+
+const uint16_t DEF_LUMIN_HIGH = 768;
+
+const uint8_t DEF_TEMP_AIR = 1;
+
+const int16_t DEF_MIN_TEMP_AIR = -10;
+
+const int16_t DEF_MAX_TEMP_AIR = 60;
+
+const uint8_t DEF_HYGR = 1;
+
+const int16_t DEF_HYGR_MINT = 0;
+
+const int16_t DEF_HYGR_MAXT = 50;
+
+const uint8_t DEF_PRESSURE = 1;
+
+const int16_t DEF_PRESSURE_MIN = 850;
+
+const int16_t DEF_PRESSURE_MAX = 1030;
+
+const uint8_t COMPT_FICH = 1;
+bool loc_eco = true;
+
+
+// === GLOBAL CONFIG ===
+
+uint8_t LOG_INTERVAL;
+
+uint16_t FILE_MAX_SIZE;
+
+uint8_t TIMEOUT;
+
+uint8_t LUMIN;
+
+uint16_t LUMIN_LOW;
+
+uint16_t LUMIN_HIGH;
+
+uint8_t TEMP_AIR;
+
+int16_t MIN_TEMP_AIR;
+
+int16_t MAX_TEMP_AIR;
+
+uint8_t HYGR;
+
+int16_t HYGR_MINT;
+
+int16_t HYGR_MAXT;
+
+uint8_t PRESSURE;
+
+int16_t PRESSURE_MIN;
+
+int16_t PRESSURE_MAX;
+
+const int Nbr_MAX_MESURE = 8;
+
+// === MODES ===
+
+uint8_t modeActuel = 1;
+
+uint8_t modePrecedent = 1;
+
+unsigned long redPressStart = 0;
+
+unsigned long greenPressStart = 0;
+
+unsigned long lastConfigActivity = 0;
+
+unsigned long lastMeasureTime = 0;
+
+bool eco_gps_skip = false;
+
+
+
+// SD logging
+
+File currentFile;
+
+char baseFilename[20];
+char fileName[20];
+
+
+
+// Interrupt flags
+
+volatile bool redPressed = false;
+
+volatile bool greenPressed = false;
+
+volatile unsigned long redPressTime = 0;
+
+volatile unsigned long greenPressTime = 0;
 
 
 
 void setup() {
-  Serial.begin(9600); 
-  gpsSerial.begin(9600);
 
-  pinMode(PIN_BOUTON_ROUGE, INPUT_PULLUP);
-  pinMode(PIN_BOUTON_VERT, INPUT_PULLUP);
-  pinMode(PIN_LUMIERE, INPUT);
+  Serial.begin(9600);
 
-  Serial.println(F("\n--- Verification composants ---"));
-  
-  if (!rtc.begin()) {
-    Serial.println(F("ERREUR: RTC non detecte"));
-    modeLED = 5;
-  } else {
-    Serial.println(F("OK: RTC"));
+  Wire.begin();
+
+  rtc.begin();
+
+  SoftSerial.begin(9600);
+
+  pinMode(RED_BUTTON, INPUT_PULLUP);
+
+  pinMode(GREEN_BUTTON, INPUT_PULLUP);
+
+  leds.setColorRGB(0, 0, 255, 0);
+
+  bme.begin();
+
+  bool status = bme.begin();
+
+  if (!status) {
+
+    Serial.println(F("Erreur : capteur BME280 introuvable !"));
+
+    indicateError(3);  
+
   }
-  
-  if (!bme.begin()) {
-    Serial.println(F("ERREUR: BME280 non detecte"));
-    modeLED = 7;
-  } else {
-    Serial.println(F("OK: BME280"));
-  }
-  
-  carteSD_presente = SD.begin(PIN_SD_CS);
-  if (!carteSD_presente) {
-    Serial.println(F("ERREUR: Carte SD absente"));
-    modeLED = 10;
-  } else {
-    Serial.println(F("OK: Carte SD"));
-  }
-  
-  // Test GPS au démarrage
-  Serial.print(F("Test GPS..."));
-  unsigned long debut = millis();
-  bool gpsOK = false;
-  while (millis() - debut < 5000) {
-    while (gpsSerial.available()) {
-      gps.encode(gpsSerial.read());
-      if (gps.location.isValid()) {
-        gpsOK = true;
-        break;
-      }
+
+  loadConfigFromEEPROM();
+
+
+
+  if (!SD.begin(SD_CS)) {
+
+    Serial.println(F("SD init failed!"));
+
+    while (!SD.begin(SD_CS)) {
+
+      leds.setColorRGB(0, 255, 0, 0);
+
+      delay(500);
+
+      leds.setColorRGB(0, 255, 255, 255);
+
+      delay(500);
+
     }
-    if (gpsOK) break;
-  }
-  
-  if (gpsOK) {
-    Serial.println(F(" OK: GPS"));
-  } else {
-    Serial.println(F(" ATTENTION: GPS non disponible"));
-  }
-  
-  Serial.println(F("--- Systeme pret ---\n"));
 
-  if (digitalRead(PIN_BOUTON_ROUGE) == LOW) {
-    mode_actuel = 1;
-    setLED(2);
-    Serial.println(F("\n>>> DEMARRAGE EN MODE CONFIGURATION"));
-  } else {
-    mode_actuel = 0;
-    setLED(1);
-    Serial.println(F("\n>>> DEMARRAGE EN MODE STANDARD"));
   }
 
-  attachInterrupt(digitalPinToInterrupt(PIN_BOUTON_ROUGE), ISR_bouton_rouge, FALLING);
-  attachInterrupt(digitalPinToInterrupt(PIN_BOUTON_VERT), ISR_bouton_vert, FALLING);
-  
+
+
+  if (digitalRead(RED_BUTTON) == LOW) {
+
+    modeActuel = 2;
+
+    setLEDForMode(2);
+
+    lastConfigActivity = millis();
+
+  }
+
+
+
+  applyFilenameForNow(0);
+
+
+
+  attachInterrupt(digitalPinToInterrupt(RED_BUTTON), onRedButtonChange, CHANGE);
+
+  attachInterrupt(digitalPinToInterrupt(GREEN_BUTTON), onGreenButtonChange, CHANGE);
+
+
+
 }
+
+
 
 void loop() {
-  checkButtons();
-  updateLED();
 
-  unsigned long now = millis();
 
-  if (mode_actuel == 0 ){
-    modeStandard();
-    } 
-  else if (mode_actuel == 1) {
-    modeConfig();
-    } 
-  else if (mode_actuel == 2) {
-    modeEco();
-    } 
-  else if (mode_actuel == 3) {
-    modeMaint();
+
+  switch (modeActuel) {
+
+    case 1: modeStandard(); break;
+
+    case 2: modeConfiguration(); break;
+
+    case 3: modeMaintenance(); break;
+
+    case 4: modeEconomique(); break;
+
   }
+
 }
+
+
+
+void onRedButtonChange() {
+
+  if (digitalRead(RED_BUTTON) == LOW) {
+
+    redPressed = true;
+
+    redPressTime = millis();
+
+  } else {
+
+    if (redPressed && millis() - redPressTime >= 5000) {
+
+      if (modeActuel == 1 || modeActuel == 4) {
+
+        modePrecedent = modeActuel;
+
+        modeActuel = 3;
+
+        setLEDForMode(3);
+
+      } else if (modeActuel == 3) {
+
+        modeActuel = modePrecedent;
+
+        setLEDForMode(modeActuel);
+
+      }
+
+    }
+
+    redPressed = false;
+
+  }
+
+}
+
+
+
+void onGreenButtonChange() {
+
+  if (digitalRead(GREEN_BUTTON) == LOW) {
+
+    greenPressed = true;
+
+    greenPressTime = millis();
+
+  } else {
+
+    if (greenPressed && millis() - greenPressTime >= 5000 && modeActuel == 1) {
+
+      modePrecedent = modeActuel;
+
+      modeActuel = 4;
+
+      setLEDForMode(4);
+
+    }
+
+    else if (greenPressed && millis() - greenPressTime >= 5000 && modeActuel == 4) {
+
+      modePrecedent = modeActuel;
+
+      modeActuel = 1;
+
+      setLEDForMode(1);
+
+    }
+
+    greenPressed = false;
+
+  }
+
+}
+
+
+
+void loadConfigFromEEPROM() {
+
+  if (EEPROM.read(EEPROM_LOG_INTERVAL_ADDR) == 0xFF) {
+
+    writeDefaultsToEEPROM();
+
+  }
+
+  LOG_INTERVAL = EEPROM.read(EEPROM_LOG_INTERVAL_ADDR);
+
+  EEPROM.get(EEPROM_FILE_MAX_SIZE_ADDR, FILE_MAX_SIZE);
+
+  TIMEOUT = EEPROM.read(EEPROM_TIMEOUT_ADDR);
+
+  LUMIN = EEPROM.read(EEPROM_LUMIN_ADDR);
+
+  EEPROM.get(EEPROM_LUMIN_LOW_ADDR, LUMIN_LOW);
+
+  EEPROM.get(EEPROM_LUMIN_HIGH_ADDR, LUMIN_HIGH);
+
+  TEMP_AIR = EEPROM.read(EEPROM_TEMP_AIR_ADDR);
+
+  EEPROM.get(EEPROM_MIN_TEMP_AIR_ADDR, MIN_TEMP_AIR);
+
+  EEPROM.get(EEPROM_MAX_TEMP_AIR_ADDR, MAX_TEMP_AIR);
+
+  HYGR = EEPROM.read(EEPROM_HYGR_ADDR);
+
+  EEPROM.get(EEPROM_HYGR_MINT_ADDR, HYGR_MINT);
+
+  EEPROM.get(EEPROM_HYGR_MAXT_ADDR, HYGR_MAXT);
+
+  PRESSURE = EEPROM.read(EEPROM_PRESSURE_ADDR);
+
+  EEPROM.get(EEPROM_PRESSURE_MIN_ADDR, PRESSURE_MIN);
+
+  EEPROM.get(EEPROM_PRESSURE_MAX_ADDR, PRESSURE_MAX);
+
+}
+
+
+
+void writeDefaultsToEEPROM() {
+
+  EEPROM.update(EEPROM_LOG_INTERVAL_ADDR, DEF_LOG_INTERVAL);
+
+  EEPROM.put(EEPROM_FILE_MAX_SIZE_ADDR, DEF_FILE_MAX_SIZE);
+
+  EEPROM.update(EEPROM_TIMEOUT_ADDR, DEF_TIMEOUT);
+
+  EEPROM.update(EEPROM_LUMIN_ADDR, DEF_LUMIN);
+
+  EEPROM.put(EEPROM_LUMIN_LOW_ADDR, DEF_LUMIN_LOW);
+
+  EEPROM.put(EEPROM_LUMIN_HIGH_ADDR, DEF_LUMIN_HIGH);
+
+  EEPROM.update(EEPROM_TEMP_AIR_ADDR, DEF_TEMP_AIR);
+
+  EEPROM.put(EEPROM_MIN_TEMP_AIR_ADDR, DEF_MIN_TEMP_AIR);
+
+  EEPROM.put(EEPROM_MAX_TEMP_AIR_ADDR, DEF_MAX_TEMP_AIR);
+
+  EEPROM.update(EEPROM_HYGR_ADDR, DEF_HYGR);
+
+  EEPROM.put(EEPROM_HYGR_MINT_ADDR, DEF_HYGR_MINT);
+
+  EEPROM.put(EEPROM_HYGR_MAXT_ADDR, DEF_HYGR_MAXT);
+
+  EEPROM.update(EEPROM_PRESSURE_ADDR, DEF_PRESSURE);
+
+  EEPROM.put(EEPROM_PRESSURE_MIN_ADDR, DEF_PRESSURE_MIN);
+
+  EEPROM.put(EEPROM_PRESSURE_MAX_ADDR, DEF_PRESSURE_MAX);
+
+}
+
+
+
+void setLEDForMode(uint8_t mode) {
+
+  switch (mode) {
+
+    case 1: leds.setColorRGB(0, 0, 255, 0); break; // Couleur Verte
+
+    case 2: leds.setColorRGB(0, 255, 255, 0); break; // Couleur Jaune
+
+    case 3: leds.setColorRGB(0, 255, 165, 0); break; // Couleur orange
+
+    case 4: leds.setColorRGB(0, 0, 0, 255); break; // Bleu
+
+    default: leds.setColorRGB(0, 0, 255, 0); break;  //Verte, couleur par defaut
+
+  }
+
+}
+
+
+
+void indicateError(uint8_t code) {
+
+  while (true) {
+
+    switch (code) {
+
+      case 1: // RTC error
+
+        leds.setColorRGB(0, 255, 0, 0); delay(500);
+
+        leds.setColorRGB(0, 0, 0, 255); delay(500);
+
+        break;
+
+      case 2: // GPS error
+
+        leds.setColorRGB(0, 255, 0, 0); delay(500);
+
+        leds.setColorRGB(0, 255, 60, 0); delay(500);
+
+        break;
+
+      case 3: // Sensor error
+
+        leds.setColorRGB(0, 255, 0, 0); delay(500);
+
+        leds.setColorRGB(0, 0, 255, 0); delay(500);
+
+        break;
+
+      case 4: // Sensor incoherent
+
+        leds.setColorRGB(0, 255, 0, 0); delay(500);
+
+        leds.setColorRGB(0, 0, 255, 0); delay(1000);
+
+        break;
+
+      case 5: // SD full
+
+        leds.setColorRGB(0, 255, 0, 0); delay(500);
+
+        leds.setColorRGB(0, 255, 255, 255); delay(500);
+
+        break;
+
+      case 6: // SD write error
+
+        leds.setColorRGB(0, 255, 0, 0); delay(500);
+
+        leds.setColorRGB(0, 255, 255, 255); delay(1000);
+
+        break;
+
+      default:
+
+        leds.setColorRGB(0, 255, 0, 0); delay(500);
+
+        leds.setColorRGB(0, 255, 255, 255); delay(500);
+
+        break;
+
+    }
+
+  }
+
+}
+
+
+
+void modeStandard() {
+
+Serial.println(F("--- Standard Mode ---"));
+
+setLEDForMode(1);
+
+  static unsigned long interval_ms = 0;
+
+  if (interval_ms == 0) interval_ms = 5UL * 1000UL; //(unsigned long)LOG_INTERVAL * 60
+
+  if (millis() - lastMeasureTime >= interval_ms) {
+
+    lastMeasureTime = millis();
+
+    save_data();
+
+  }
+
+}
+
+
+
+void modeConfiguration() {
+
+    Serial.println(F("--- Configuration Mode ---"));
+
+  setLEDForMode(2);
+
+  if (Serial.available() > 0) {
+
+    char buffer[32];
+
+    int bytesRead = Serial.readBytesUntil('\n', buffer, sizeof(buffer) - 1);
+
+    buffer[bytesRead] = '\0';
+
+    processConfigurationCommand(buffer);
+
+    lastConfigActivity = millis();
+
+  }
+
+  if (millis() - lastConfigActivity >= 30UL * 60UL * 1000UL) {
+
+    modeActuel = 1;
+
+    setLEDForMode(1);
+
+  }
+
+}
+
+
+
+void modeMaintenance() {
+
+    Serial.println(F("--- Maintenance Mode ---"));
+
+  setLEDForMode(3);
+
+    Serial.println(F("--- Maintenance ---"));
+
+    Serial.print(F("Loc: ")); Serial.println(get_localisation());
+
+    Serial.print(F("Temp: ")); Serial.println(get_temp());
+
+    Serial.print(F("Hum: ")); Serial.println(get_humidity());
+
+    Serial.print(F("Pres: ")); Serial.println(get_pressure());
+
+    Serial.print(F("Lum: ")); Serial.println(get_luminosity());
+
+    DateTime now = rtc.now();
+
+    char t[20];
+
+    snprintf(t, sizeof(t), "%02d/%02d/%04d %02d:%02d:%02d", now.day(), now.month(), now.year(), now.hour(), now.minute(), now.second());
+
+    Serial.println(t);
+
+    Serial.println(F("La carte SD peut être retiré."));
+
+  delay(2000);
+
+}
+
+
+
+void modeEconomique() {
+
+    Serial.println(F("--- Economic Mode ---"));
+
+  setLEDForMode(4);
+
+  static unsigned long interval_ms = 0;
+
+  if (interval_ms == 0) interval_ms = 5UL * 1000UL * 2UL; //(unsigned long)LOG_INTERVAL * 60
+
+  if (millis() - lastMeasureTime >= interval_ms) {
+
+    lastMeasureTime = millis();
+
+    save_data();
+
+  }
+
+}
+
+
+
+float get_luminosity() {
+
+  int sensorValue = analogRead(LIGHT_SENSOR);
+
+  return sensorValue; 
+
+}
+
+
+
+float get_temp()
+
+{
+
+   float temp(NAN), hum(NAN), pres(NAN);
+
+
+
+   BME280::TempUnit tempUnit(BME280::TempUnit_Celsius);
+
+   BME280::PresUnit presUnit(BME280::PresUnit_Pa);
+
+
+
+   bme.read(pres, temp, hum);
+
+  return temp;
+
+}
+
+
+
+float get_humidity()
+
+{
+
+   float temp(NAN), hum(NAN), pres(NAN);
+
+
+
+   BME280::TempUnit tempUnit(BME280::TempUnit_Celsius);
+
+   BME280::PresUnit presUnit(BME280::PresUnit_Pa);
+
+
+
+   bme.read(pres, temp, hum);
+
+  return hum;
+
+}
+
+
+
+float get_pressure()
+
+{
+
+   float temp(NAN), hum(NAN), pres(NAN);
+
+
+
+   BME280::TempUnit tempUnit(BME280::TempUnit_Celsius);
+
+   BME280::PresUnit presUnit(BME280::PresUnit_Pa);
+
+
+
+   bme.read(pres, temp, hum);
+
+  return pres;
+
+}
+
+
+
+String get_localisation() {
+
+  if (modeActuel == 4) {
+
+    eco_gps_skip = !eco_gps_skip;
+
+    if (eco_gps_skip) return F("NA (ECO)");
+
+  }
+
+
+
+  unsigned long startTime = millis();
+
+  while (millis() - startTime < 2000) {
+
+    if (SoftSerial.available()) {
+
+      String gpsData = SoftSerial.readStringUntil('\n');
+
+      gpsData.trim();
+
+
+
+      if (gpsData.startsWith("$GPGGA") || gpsData.startsWith("$GNGGA") || gpsData.startsWith("$GNMRC")) {
+
+        int fieldIndex = 0;
+
+        String latitude, longitude;
+
+        char latDir = ' ', lonDir = ' ';
+
+        int start = 0;
+
+
+
+        for (int i = 0; i < (int)gpsData.length(); i++) {
+
+          if (gpsData[i] == ',' || i == (int)gpsData.length() - 1) {
+
+            String token = gpsData.substring(start, i);
+
+            start = i + 1;
+
+            fieldIndex++;
+
+
+
+            if (fieldIndex == 3) latitude = token;
+
+            else if (fieldIndex == 4 && token.length() > 0) latDir = token[0];
+
+            else if (fieldIndex == 5) longitude = token;
+
+            else if (fieldIndex == 6 && token.length() > 0) lonDir = token[0];
+
+          }
+
+        }
+
+
+
+        if (latitude.length() && longitude.length()) {
+
+          return latitude + latDir + "," + longitude + lonDir;
+
+        }
+
+      }
+
+    }
+
+    delay(10); 
+
+  }
+
+
+
+  return F("");
+
+}
+
+
+
+
+
+void applyFilenameForNow(uint8_t revision) {
+
+  DateTime now = rtc.now();
+  if (revision == 0) 
+  {
+    snprintf(baseFilename, sizeof(baseFilename), "%02d%02d%02d_%d.LOG", now.year() % 100, now.month(), now.day(), revision);
+  } else  snprintf(fileName, sizeof(fileName), "%02d%02d%02d_%d.LOG", now.year() % 100, now.month(), now.day(), revision);
+
+}
+
+
+void save_data() {
+  applyFilenameForNow(0);
+  static int compt = COMPT_FICH;      // numéro du fichier courant
+  int lignes = 0;
+
+  // Nom du fichier courant
+
+  // === Compter le nombre de lignes déjà présentes dans le fichier ===
+  File f = SD.open(baseFilename, FILE_READ);
+  if (f) {
+    bool prevCR = false;
+    while (f.available()) {
+      char c = f.read();
+      if (c == '\n') {
+        if (!prevCR) lignes++;
+        prevCR = false;
+      } else if (c == '\r') {
+        lignes++;
+        prevCR = true;
+      } else {
+        prevCR = false;
+      }
+    }
+    f.close();
+  }
+
+  // === Si le fichier atteint le nombre max de mesures, passer au suivant ===
+  if (lignes >= Nbr_MAX_MESURE) {
+    applyFilenameForNow(compt);
+    copyFile(baseFilename, fileName);
+    compt++;
+    EEPROM.update(EEPROM_COMPT_FICH, compt);
+    lignes = 0;
+    File f = SD.open(baseFilename, O_WRITE | O_CREAT | O_TRUNC);
+    f.close();
+  }
+
+  // === Ouverture du fichier en mode ajout (ou création s’il n’existe pas) ===
+  currentFile = SD.open(baseFilename, FILE_WRITE);
+  if (!currentFile) {
+    Serial.println(F("Impossible d'ouvrir le fichier en écriture"));
+    indicateError(6); // signaler une erreur SD
+    return;
+  }
+
+  // === Préparer la date et heure ===
+  DateTime now = rtc.now();
+  char timeBuffer[25];
+  snprintf(timeBuffer, sizeof(timeBuffer),
+           "%02d/%02d/%04d %02d:%02d:%02d",
+           now.day(), now.month(), now.year(),
+           now.hour(), now.minute(), now.second());
+
+  // === Écriture des données ===
+
+  currentFile.print(F("Loc: ")); currentFile.print(get_localisation());
+  currentFile.print(F("; Temp: ")); currentFile.print(get_temp());
+  currentFile.print(F("; Hum: ")); currentFile.print(get_humidity());
+  currentFile.print(F("; Pres: ")); currentFile.print(get_pressure());
+  currentFile.print(F(" Pa; Lum: ")); currentFile.print(get_luminosity());
+  currentFile.print(F("; Date & Heure: ")); currentFile.println(timeBuffer);
+
+  // === Fermer proprement ===
+  currentFile.flush();
+  currentFile.close();
+
+  Serial.print(F("Mesure sauvegardée dans ")); Serial.println(baseFilename);
+}
+
+
+void copyFile(const char* sourceName, const char* destName) {
+  // 1. Ouvrir le fichier source en lecture
+  File sourceFile = SD.open(sourceName, FILE_READ);
+  if (!sourceFile) {
+    return ;
+  }
+
+  // 2. Créer (ou ouvrir en écriture) le fichier destination
+  File destFile = SD.open(destName, FILE_WRITE);
+  if (!destFile) {
+    sourceFile.close();
+    return ;
+  }
+  // 3. Lire le fichier source et écrire dans le fichier destination
+  while (sourceFile.available()) {
+    // Lire un octet du fichier source
+    char data = sourceFile.read();
+    // Écrire cet octet dans le fichier destination
+    destFile.write(data);
+  }
+  // 4. Fermer les deux fichiers
+  destFile.close();
+  sourceFile.close();
+  Serial.println(F("Copie terminée."));
+}
+
+
+void processConfigurationCommand(char* input) {
+
+  char* eq = strchr(input, '=');
+
+  if (eq) {
+
+    *eq = '\0';
+
+    char* cmd = input;
+
+    char* valueStr = eq + 1;
+
+    int value = atoi(valueStr);
+
+    if (strcmp(cmd, "LOG_INTERVAL") == 0) {
+
+      LOG_INTERVAL = constrain(value, 1, 255);
+
+      EEPROM.update(EEPROM_LOG_INTERVAL_ADDR, LOG_INTERVAL);
+
+    } else if (strcmp(cmd, "FILE_MAX_SIZE") == 0) {
+
+      FILE_MAX_SIZE = constrain(value, 0, 65535);
+
+      EEPROM.put(EEPROM_FILE_MAX_SIZE_ADDR, FILE_MAX_SIZE);
+
+    } else if (strcmp(cmd, "TIMEOUT") == 0) {
+
+      TIMEOUT = constrain(value, 0, 255);
+
+      EEPROM.update(EEPROM_TIMEOUT_ADDR, TIMEOUT);
+
+    } else if (strcmp(cmd, "LUMIN") == 0) {
+
+      LUMIN = constrain(value, 0, 1);
+
+      EEPROM.update(EEPROM_LUMIN_ADDR, LUMIN);
+
+    } else if (strcmp(cmd, "LUMIN_LOW") == 0) {
+
+      LUMIN_LOW = constrain(value, 0, 1023);
+
+      EEPROM.put(EEPROM_LUMIN_LOW_ADDR, LUMIN_LOW);
+
+    } else if (strcmp(cmd, "LUMIN_HIGH") == 0) {
+
+      LUMIN_HIGH = constrain(value, 0, 1023);
+
+      EEPROM.put(EEPROM_LUMIN_HIGH_ADDR, LUMIN_HIGH);
+
+    } else if (strcmp(cmd, "RESET") == 0) {
+
+      writeDefaultsToEEPROM();
+
+      loadConfigFromEEPROM();
+
+    }
+
+    
+
+  }
+
+}
+
