@@ -446,19 +446,6 @@ void setup() {
   pinMode(PIN_BOUTON_VERT, INPUT_PULLUP);
   pinMode(PIN_LUMIERE, INPUT);
 
-  attachInterrupt(digitalPinToInterrupt(PIN_BOUTON_ROUGE), ISR_bouton_rouge, FALLING);
-  attachInterrupt(digitalPinToInterrupt(PIN_BOUTON_VERT), ISR_bouton_vert, FALLING);
-
-  if (digitalRead(PIN_BOUTON_ROUGE) == LOW) {
-    mode_actuel = 1;
-    setLED(2);
-    Serial.println(F("\n>>> DEMARRAGE EN MODE CONFIGURATION"));
-  } else {
-    mode_actuel = 0;
-    setLED(1);
-    Serial.println(F("\n>>> DEMARRAGE EN MODE STANDARD"));
-  }
-
   Serial.println(F("\n--- Verification composants ---"));
   
   if (!rtc.begin()) {
@@ -505,6 +492,20 @@ void setup() {
   }
   
   Serial.println(F("--- Systeme pret ---\n"));
+
+  if (digitalRead(PIN_BOUTON_ROUGE) == LOW) {
+    mode_actuel = 1;
+    setLED(2);
+    Serial.println(F("\n>>> DEMARRAGE EN MODE CONFIGURATION"));
+  } else {
+    mode_actuel = 0;
+    setLED(1);
+    Serial.println(F("\n>>> DEMARRAGE EN MODE STANDARD"));
+  }
+
+  attachInterrupt(digitalPinToInterrupt(PIN_BOUTON_ROUGE), ISR_bouton_rouge, FALLING);
+  attachInterrupt(digitalPinToInterrupt(PIN_BOUTON_VERT), ISR_bouton_vert, FALLING);
+  
 }
 
 void loop() {
