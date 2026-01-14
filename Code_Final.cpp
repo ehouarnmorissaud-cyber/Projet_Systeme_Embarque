@@ -19,10 +19,9 @@ SoftwareSerial gpsSerial(8, 9);
 TinyGPSPlus gps;
 BME280I2C bme;
 ChainableLED leds(PIN_LED_1, PIN_LED_2, 1);
-File fichier ;
 
-byte mode_actuel = 0;
-byte mode_precedent = 0;
+uint8_t mode_actuel = 0;
+uint8_t mode_precedent = 0;
 
 volatile bool bouton_rouge_presse = false;
 volatile bool bouton_vert_presse = false;
@@ -30,49 +29,44 @@ volatile bool bouton_vert_presse = false;
 bool carteSD_presente = true;
 
 // Capteurs
-float temperature_air;
-float humidite;
-float pression_atmospherique;
-int luminosite;
+int8_t temperature_air;
+int8_t humidite;
+int16_t pression_atmospherique;
+uint16_t luminosite;
 
 // GPS
 float latitude;
 float longitude;
 
 // RTC
-int annee;
-byte mois, jour, heure, minute, seconde;
+byte annee, mois, jour, heure, minute, seconde;
 
-// Config réduite
-bool LUMIN = 1;
-byte LUMIN_LOW = 255;
-int LUMIN_HIGH = 768;
-bool TEMP_AIR = 1;
-char MIN_TEMP_AIR = -10;
-char MAX_TEMP_AIR = 60;
-bool HYGR = 1;
-int HYGR_MINT = 0;
-int HYGR_MAXT = 50;
-bool PRESSURE = 1;
-int PRESSURE_MIN = 850;
-int PRESSURE_MAX = 1080;
-byte LOG_INTERVAL = 10;
-int FILE_MAX_SIZE = 4096;
-int TIMEOUT = 30;
+// Config mode avec réduction
+uint16_t LUMIN_LOW = 255;
+uint16_t LUMIN_HIGH = 768;
+
+int8_t MIN_TEMP_AIR = -10;
+int8_t MAX_TEMP_AIR = 60;
+
+int8_t HYGR_MINT = 0;
+int8_t HYGR_MAXT = 50;
+
+int16_t PRESSURE_MIN = 850;
+int16_t PRESSURE_MAX = 1080;
+
+uint8_t LOG_INTERVAL = 10;
+uint16_t FILE_MAX_SIZE = 4096;
+uint16_t TIMEOUT = 30;
 byte version_logiciel = 2;
 
 //Config réinitialisation
 void resetConfiguration() {
-  LUMIN = 1;
   LUMIN_LOW = 255;
   LUMIN_HIGH = 768;
-  TEMP_AIR = 1;
   MIN_TEMP_AIR = -10;
   MAX_TEMP_AIR = 60;
-  HYGR = 1;
   HYGR_MINT = 0;
   HYGR_MAXT = 50;
-  PRESSURE = 1;
   PRESSURE_MIN = 850;
   PRESSURE_MAX = 1080;
   LOG_INTERVAL = 10;
@@ -80,8 +74,7 @@ void resetConfiguration() {
   TIMEOUT = 30;
 }
 
-unsigned long dernierLog = 0;
-byte modeLED = 0; // 0=off, 1=vert, 2=jaune, 3=bleu, 4=orange, 5+=erreurs
+uint8_t modeLED = 0; // 0=off, 1=vert, 2=jaune, 3=bleu, 4=orange, 5+=erreurs
 
 // ============================================================================
 // LED
@@ -154,9 +147,9 @@ void updateSensors() {
     return;
   }
   
-  temperature_air = t;
-  humidite = h;
-  pression_atmospherique = p;
+  temperature_air = (int)t;
+  humidite = (int)h;
+  pression_atmospherique = (int)p;
   luminosite = analogRead(PIN_LUMIERE);
 }
 
@@ -181,11 +174,12 @@ void getGPS() {
 }
 
 void saveSD() {
+  File fichier ;
   if (carteSD_presente) {
-    char nomFichier[25];
+    char nomFichier[20];
     sprintf(
       nomFichier,
-      "%04d%02d%02d_%02d%02d%02d.LOG",
+      "%02d%02d%02d_%02d%02d%02d.LOG",
       annee,
       mois,
       jour,
@@ -208,7 +202,7 @@ void saveSD() {
   else
   {
     Serial.println(F("ERREUR: Carte SD absente"));
-    modeLED = 9;
+    modeLED = 10;
   }
 }
 
@@ -281,6 +275,7 @@ void modeConfig() {
     lastAct = millis();
     Serial.println(F("Commande recue"));
 
+
     String ligne = Serial.readStringUntil('\n'); // Récupère la ligne rédigée par l'utilisateur
     ligne.trim(); // enlève \r et espaces
 
@@ -290,11 +285,7 @@ void modeConfig() {
       String commande = ligne.substring(0, indexEgal);
       int valeur = ligne.substring(indexEgal + 1).toInt();
       
-      // Traitement des différentes commandes
-      if (commande == "LUMIN" && (valeur == 0 || valeur == 1)) {
-        LUMIN = valeur;
-      }
-      else if (commande == "LUMIN_LOW" && valeur >= 0 && valeur <= 1023) {
+      if (commande == "LUMIN_LOW" && valeur >= 0 && valeur <= 1023) {
         if (valeur > LUMIN_HIGH) {
           Serial.println("Erreur : LUMIN_LOW ne peut pas être supérieur à LUMIN_HIGH");
         } 
@@ -310,9 +301,6 @@ void modeConfig() {
         else {
         LUMIN_HIGH = valeur;
         }
-      }
-      else if (commande == "TEMP_AIR" && (valeur == 0 || valeur == 1)) {
-        TEMP_AIR = valeur;
       }
       else if (commande == "MIN_TEMP_AIR" && valeur >= -40 && valeur <= 85) {
         if (valeur > MAX_TEMP_AIR)
@@ -332,9 +320,6 @@ void modeConfig() {
         MAX_TEMP_AIR = valeur;
         }
       }
-      else if (commande == "HYGR" && (valeur == 0 || valeur == 1)) {
-        HYGR = valeur;
-      }
       else if (commande == "HYGR_MINT" && valeur >= -40 && valeur <= 85) {
         if (valeur > HYGR_MAXT)
         {
@@ -352,9 +337,6 @@ void modeConfig() {
         else {
         HYGR_MAXT = valeur;
         }
-      }
-      else if (commande == "PRESSURE" && (valeur == 0 || valeur == 1)) {
-        PRESSURE = valeur;
       }
       else if (commande == "PRESSURE_MIN" && valeur >= 300 && valeur <= 1100) {
         if (valeur > PRESSURE_MAX)
@@ -460,7 +442,7 @@ void setup() {
   carteSD_presente = SD.begin(PIN_SD_CS);
   if (!carteSD_presente) {
     Serial.println(F("ERREUR: Carte SD absente"));
-    modeLED = 9;
+    modeLED = 10;
   } else {
     Serial.println(F("OK: Carte SD"));
   }
