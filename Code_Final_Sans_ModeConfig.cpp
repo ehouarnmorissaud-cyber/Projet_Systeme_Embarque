@@ -28,19 +28,22 @@ volatile bool bouton_rouge_presse = false;
 volatile bool bouton_vert_presse = false;
 
 bool carteSD_presente = true;
+bool rtc_ok = false;
+bool bme_ok = false;
 
 // Capteurs
-float temperature_air;
-float humidite;
-float pression_atmospherique;
-float luminosite;
+float temperature_air = 20.0;
+float humidite = 50.0;
+float pression_atmospherique = 1013.25;
+uint16_t luminosite = 0;
 
 // GPS
-float latitude;
-float longitude;
+float latitude = 0;
+float longitude = 0;
 
 // RTC
-byte annee, mois, jour, heure, minute, seconde;
+int annee = 2026;
+byte mois = 1, jour = 1, heure = 0, minute = 0, seconde = 0;
 
 
 // ============================================================================
@@ -62,12 +65,12 @@ void setLED(byte mode) {
 }
 
 void updateLED() {
-  if (modeLED == 5) gererLED(255, 0, 0, 0, 0, 255, 500, 500);      // ROUGE-BLEU
-  else if (modeLED == 6) gererLED(255, 0, 0, 255, 255, 0, 500, 500);   // ROUGE-JAUNE
-  else if (modeLED == 7) gererLED(255, 0, 0, 0, 255, 0, 500, 500);     // ROUGE-VERT
-  else if (modeLED == 8) gererLED(255, 0, 0, 0, 255, 0, 333, 667);     // ROUGE-VERT LONG
-  else if (modeLED == 9) gererLED(255, 0, 0, 255, 255, 255, 500, 500); // ROUGE-BLANC
-  else if (modeLED == 10) gererLED(255, 0, 0, 255, 255, 255, 333, 667);// ROUGE-BLANC LONG
+  if (modeLED == 5) gererLED(255, 0, 0, 0, 0, 255, 500, 500);
+  else if (modeLED == 6) gererLED(255, 0, 0, 255, 255, 0, 500, 500);
+  else if (modeLED == 7) gererLED(255, 0, 0, 0, 255, 0, 500, 500);
+  else if (modeLED == 8) gererLED(255, 0, 0, 0, 255, 0, 333, 667);
+  else if (modeLED == 9) gererLED(255, 0, 0, 255, 255, 255, 500, 500);
+  else if (modeLED == 10) gererLED(255, 0, 0, 255, 255, 255, 333, 667);
 }
 
 // ============================================================================
@@ -81,11 +84,16 @@ void ISR_bouton_vert() { bouton_vert_presse = true; }
 // ============================================================================
 
 void updateDateTime() {
-  if (!rtc.begin()) {
-    Serial.println(F("ERREUR: RTC non detecte"));
-    modeLED = 5; // ROUGE-BLEU
+  if (!rtc_ok) {
+    Serial.println(F("RTC non disponible"));
+    // Utiliser millis() comme horloge de secours
+    unsigned long sec = millis() / 1000;
+    seconde = sec % 60;
+    minute = (sec / 60) % 60;
+    heure = (sec / 3600) % 24;
     return;
   }
+  
   DateTime now = rtc.now();
   annee = now.year();
   mois = now.month();
@@ -93,30 +101,53 @@ void updateDateTime() {
   heure = now.hour();
   minute = now.minute();
   seconde = now.second();
+  
+  // Affichage de l'horloge
+  Serial.print(F("Date: "));
+  if (jour < 10) Serial.print('0');
+  Serial.print(jour);
+  Serial.print('/');
+  if (mois < 10) Serial.print('0');
+  Serial.print(mois);
+  Serial.print('/');
+  Serial.print(annee);
+  
+  Serial.print(F(" Heure: "));
+  if (heure < 10) Serial.print('0');
+  Serial.print(heure);
+  Serial.print(':');
+  if (minute < 10) Serial.print('0');
+  Serial.print(minute);
+  Serial.print(':');
+  if (seconde < 10) Serial.print('0');
+  Serial.println(seconde);
 }
 
 void updateSensors() {
+  // Luminosité (toujours disponible)
+  luminosite = analogRead(PIN_LUMIERE);
+  
+  if (!bme_ok) {
+    Serial.println(F("BME280 non disponible - valeurs par defaut"));
+    return;
+  }
+  
   float t, h, p;
   bme.read(p, t, h, BME280::TempUnit_Celsius, BME280::PresUnit_Pa);
   
   if (isnan(t) || isnan(h) || isnan(p)) {
-    Serial.println(F("ERREUR: Capteur BME280 inaccessible"));
-    modeLED = 7; // ROUGE-VERT
+    Serial.println(F("Erreur lecture BME280"));
     return;
   }
   
   if (t < -40 || t > 85 || h < 0 || h > 100) {
-    Serial.println(F("ERREUR: Donnees capteur incoherentes"));
-    Serial.print(F("  Temp: ")); Serial.print(t);
-    Serial.print(F(" Hum: ")); Serial.println(h);
-    modeLED = 8; // ROUGE-VERT LONG
+    Serial.println(F("Donnees BME280 incoherentes"));
     return;
   }
   
   temperature_air = t;
   humidite = h;
-  pression_atmospherique = p;
-  luminosite = analogRead(PIN_LUMIERE);
+  pression_atmospherique = p / 100.0; // Pa vers hPa
 }
 
 void getGPS() {
@@ -126,53 +157,75 @@ void getGPS() {
     if (gps.location.isValid()) {
       latitude = gps.location.lat();
       longitude = gps.location.lng();
-      Serial.print(F("GPS OK: "));
+      Serial.print(F("GPS: "));
       Serial.print(latitude, 6);
       Serial.print(F(", "));
       Serial.println(longitude, 6);
       return;
     }
   }
-  Serial.println(F("ERREUR: GPS non disponible"));
+  Serial.println(F("GPS non disponible"));
   latitude = 0;
   longitude = 0;
-  modeLED = 6; // ROUGE-JAUNE
 }
 
 void saveSD() {
-  File fichier ;
-  if (carteSD_presente) {
-    char nomFichier[20];
-    sprintf(
-      nomFichier,
-      "%02d%02d%02d_%02d%02d%02d.LOG",
-      annee,
-      mois,
-      jour,
-      heure,
-      minute,
-      seconde
-    );
-
-    fichier = SD.open( nomFichier, FILE_WRITE);
-
-    if (fichier){
-      fichier.print("TEMP : "); fichier.println(temperature_air);
-      fichier.print("HUM : "); fichier.println(humidite);
-      fichier.print("PRESS : "); fichier.println(pression_atmospherique);
-      fichier.print("LUM : "); fichier.println(luminosite);
-      fichier.print("CO : "); fichier.println(longitude, latitude);
-      fichier.close();
-    }
-  }
-  else
-  {
-    Serial.println(F("ERREUR: Carte SD absente"));
+  if (!carteSD_presente) {
+    Serial.println(F("Carte SD absente"));
     modeLED = 10;
+    return;
   }
+  
+  // Nom de fichier avec date complète
+  char nomFichier[25];
+  sprintf(nomFichier, "%04d%02d%02d.LOG", annee, mois, jour);
+  
+  File fichier = SD.open(nomFichier, FILE_WRITE);
+  
+  if (!fichier) {
+    Serial.print(F("Erreur ouverture fichier: "));
+    Serial.println(nomFichier);
+    modeLED = 9;
+    return;
+  }
+  
+  // Enregistrement avec horodatage
+  fichier.print(annee); fichier.print('-');
+  if (mois < 10) fichier.print('0');
+  fichier.print(mois); fichier.print('-');
+  if (jour < 10) fichier.print('0');
+  fichier.print(jour); fichier.print(' ');
+  
+  if (heure < 10) fichier.print('0');
+  fichier.print(heure); fichier.print(':');
+  if (minute < 10) fichier.print('0');
+  fichier.print(minute); fichier.print(':');
+  if (seconde < 10) fichier.print('0');
+  fichier.print(seconde);
+  fichier.print(F(" | "));
+  
+  fichier.print(F("TEMP:"));
+  fichier.print(temperature_air, 1);
+  fichier.print(F("C | HUM:"));
+  fichier.print(humidite, 1);
+  fichier.print(F("% | PRESS:"));
+  fichier.print(pression_atmospherique, 1);
+  fichier.print(F("hPa | LUM:"));
+  fichier.print(luminosite);
+  
+  if (latitude != 0 || longitude != 0) {
+    fichier.print(F(" | GPS:"));
+    fichier.print(latitude, 6);
+    fichier.print(',');
+    fichier.print(longitude, 6);
+  }
+  
+  fichier.println();
+  fichier.close();
+  
+  Serial.print(F("Enregistre dans: "));
+  Serial.println(nomFichier);
 }
-
-
 
 void checkButtons() {
   if (bouton_rouge_presse) {
@@ -186,12 +239,11 @@ void checkButtons() {
           mode_precedent = mode_actuel;
           mode_actuel = 3;
           setLED(4);
-          Serial.println(F("\n>>> Mode MAINTENANCE active"));
+          Serial.println(F("\n>>> MAINTENANCE"));
         } else if (mode_actuel == 3) {
           mode_actuel = mode_precedent;
           setLED(mode_actuel == 0 ? 1 : 3);
-          if (mode_actuel == 0) Serial.println(F("\n>>> Retour Mode STANDARD"));
-          else Serial.println(F("\n>>> Retour Mode ECONOMIQUE"));
+          Serial.println(mode_actuel == 0 ? F("\n>>> STANDARD") : F("\n>>> ECONOMIQUE"));
         }
       }
     }
@@ -207,11 +259,11 @@ void checkButtons() {
         if (mode_actuel == 0) {
           mode_actuel = 2;
           setLED(3);
-          Serial.println(F("\n>>> Mode ECONOMIQUE active"));
+          Serial.println(F("\n>>> ECONOMIQUE"));
         } else if (mode_actuel == 2) {
           mode_actuel = 0;
           setLED(1);
-          Serial.println(F("\n>>> Mode STANDARD active"));
+          Serial.println(F("\n>>> STANDARD"));
         }
       }
     }
@@ -229,115 +281,139 @@ void modeStandard() {
   updateSensors();
   getGPS();
   saveSD();
-  Serial.print(F("Temp: ")); Serial.print(temperature_air); Serial.println(F(" C"));
-  Serial.print(F("Hum: ")); Serial.print(humidite); Serial.println(F(" %"));
+  
+  Serial.print(F("Temp: ")); Serial.print(temperature_air, 1); Serial.println(F(" C"));
+  Serial.print(F("Hum: ")); Serial.print(humidite, 1); Serial.println(F(" %"));
+  Serial.print(F("Pres: ")); Serial.print(pression_atmospherique, 1); Serial.println(F(" hPa"));
+  Serial.print(F("Lum: ")); Serial.println(luminosite);
+  
+  delay(10000); // Attente 10 secondes
 }
-
-
 
 void modeEco() {
   setLED(3);
   Serial.println(F("\n=== MODE ECONOMIQUE ==="));
   updateDateTime();
   updateSensors();
+  
   static bool gpsOn = false;
   gpsOn = !gpsOn;
   if (gpsOn) {
     getGPS();
   } else {
-    Serial.println(F("GPS desactive (economie)"));
+    Serial.println(F("GPS desactive"));
   }
   saveSD();
+  
+  Serial.print(F("Temp: ")); Serial.print(temperature_air, 1); Serial.println(F(" C"));
+  Serial.print(F("Hum: ")); Serial.print(humidite, 1); Serial.println(F(" %"));
+  
+  delay(20000); // Attente 20 secondes
 }
 
 void modeMaint() {
   setLED(4);
   updateSensors();
-  Serial.println(F("\n=== MODE MAINTENANCE ==="));
-  Serial.print(F("Temp: ")); Serial.print(temperature_air); Serial.println(F(" C"));
-  Serial.print(F("Hum: ")); Serial.print(humidite); Serial.println(F(" %"));
-  Serial.print(F("Pres: ")); Serial.print(pression_atmospherique); Serial.println(F(" Pa"));
-  Serial.print(F("Lumi: ")); Serial.println(luminosite);
+  Serial.println(F("\n=== MAINTENANCE ==="));
+  Serial.print(F("Temp: ")); Serial.print(temperature_air, 1); Serial.println(F(" C"));
+  Serial.print(F("Hum: ")); Serial.print(humidite, 1); Serial.println(F(" %"));
+  Serial.print(F("Pres: ")); Serial.print(pression_atmospherique, 1); Serial.println(F(" hPa"));
+  Serial.print(F("Lum: ")); Serial.println(luminosite);
   delay(2000);
 }
 
-
-
 void setup() {
-  Serial.begin(9600); 
+  Serial.begin(9600);
+  delay(500);
+  
   gpsSerial.begin(9600);
 
   pinMode(PIN_BOUTON_ROUGE, INPUT_PULLUP);
   pinMode(PIN_BOUTON_VERT, INPUT_PULLUP);
   pinMode(PIN_LUMIERE, INPUT);
+  pinMode(PIN_SD_CS, OUTPUT);
 
-  Serial.println(F("\n--- Verification composants ---"));
+  Wire.begin();
+
+  Serial.println(F("\n=== STATION METEO ===\n"));
   
-  if (!rtc.begin()) {
-    Serial.println(F("ERREUR: RTC non detecte"));
-    modeLED = 5;
-  } else {
-    Serial.println(F("OK: RTC"));
-  }
-  
-  if (!bme.begin()) {
-    Serial.println(F("ERREUR: BME280 non detecte"));
-    modeLED = 7;
-  } else {
-    Serial.println(F("OK: BME280"));
-  }
-  
-  carteSD_presente = SD.begin(PIN_SD_CS);
-  if (!carteSD_presente) {
-    Serial.println(F("ERREUR: Carte SD absente"));
-    modeLED = 10;
-  } else {
-    Serial.println(F("OK: Carte SD"));
-  }
-  
-  // Test GPS au démarrage
-  Serial.print(F("Test GPS..."));
-  unsigned long debut = millis();
-  bool gpsOK = false;
-  while (millis() - debut < 5000) {
-    while (gpsSerial.available()) {
-      gps.encode(gpsSerial.read());
-      if (gps.location.isValid()) {
-        gpsOK = true;
-        break;
-      }
+  // RTC
+  Serial.print(F("RTC... "));
+  if (rtc.begin()) {
+    rtc_ok = true;
+    Serial.println(F("OK"));
+    
+    if (rtc.lostPower()) {
+      Serial.println(F("RTC perdu - reglage..."));
+      rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
     }
-    if (gpsOK) break;
-  }
-  
-  if (gpsOK) {
-    Serial.println(F(" OK: GPS"));
+    
+    DateTime now = rtc.now();
+    Serial.print(F("  "));
+    Serial.print(now.day()); Serial.print('/');
+    Serial.print(now.month()); Serial.print('/');
+    Serial.print(now.year()); Serial.print(' ');
+    Serial.print(now.hour()); Serial.print(':');
+    Serial.print(now.minute()); Serial.print(':');
+    Serial.println(now.second());
   } else {
-    Serial.println(F(" ATTENTION: GPS non disponible"));
+    Serial.println(F("ERREUR"));
+    modeLED = 5;
   }
   
-  Serial.println(F("--- Systeme pret ---\n"));
+  // BME280
+  Serial.print(F("BME280... "));
+  if (bme.begin()) {
+    bme_ok = true;
+    Serial.println(F("OK (0x76)"));
+  } else {
+    // Essayer l'autre adresse
+    BME280I2C::Settings settings(
+      BME280::OSR_X1, BME280::OSR_X1, BME280::OSR_X1,
+      BME280::Mode_Forced, BME280::StandbyTime_1000ms,
+      BME280::Filter_Off, BME280::SpiEnable_False, 0x77
+    );
+    BME280I2C bme2(settings);
+    
+    if (bme2.begin()) {
+      bme = bme2;
+      bme_ok = true;
+      Serial.println(F("OK (0x77)"));
+    } else {
+      Serial.println(F("ERREUR"));
+      modeLED = 7;
+    }
+  }
+  
+  // Carte SD
+  Serial.print(F("SD... "));
+  carteSD_presente = SD.begin(PIN_SD_CS);
+  if (carteSD_presente) {
+    Serial.println(F("OK"));
+  } else {
+    Serial.println(F("ERREUR"));
+    modeLED = 10;
+  }
+  
+  Serial.println(F("\n=== PRET ===\n"));
 
- 
+  mode_actuel = 0;
+  setLED(1);
 
   attachInterrupt(digitalPinToInterrupt(PIN_BOUTON_ROUGE), ISR_bouton_rouge, FALLING);
   attachInterrupt(digitalPinToInterrupt(PIN_BOUTON_VERT), ISR_bouton_vert, FALLING);
-  
 }
 
 void loop() {
   checkButtons();
   updateLED();
 
-  unsigned long now = millis();
-
-  if (mode_actuel == 0 ){
+  if (mode_actuel == 0) {
     modeStandard();
-    } 
- 
+  } 
   else if (mode_actuel == 2) {
     modeEco();
-    } 
+  } 
   else if (mode_actuel == 3) {
     modeMaint();
   }
