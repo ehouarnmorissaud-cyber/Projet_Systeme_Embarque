@@ -324,7 +324,9 @@ void modeMaint() {
 
 void setup() {
   Serial.begin(9600);
-  delay(500);
+  Wire.begin();
+  rtc.begin();
+  bme.begin();
   
   gpsSerial.begin(9600);
 
