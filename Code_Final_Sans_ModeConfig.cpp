@@ -19,27 +19,27 @@ SoftwareSerial gpsSerial(8, 9);
 TinyGPSPlus gps;
 BME280I2C bme;
 ChainableLED leds(PIN_LED_1, PIN_LED_2, 1);
-File fichier ;
+File fichier;
 
-//Modes
+// Modes
 uint8_t mode = 0, modePrev = 0, modeLED = 0;
 volatile bool btnR = false, btnV = false;
 bool sdOK = false, rtcOK = false, bmeOK = false;
 
-//Coordonnées GPS
+// Coordonnées GPS
 double latitude = NAN, longitude = NAN;
 
-//Repère temporelle (Date & heure, minute, seconde)
+// Repère temporel (Date & heure, minute, seconde)
 int Y;
-byte M , D , h , m , s;
+byte M, D, h, m, s;
 
-//Valeur capteur
+// Valeur capteur
 float temp, hum, press;
 
-//Pour mode éco
+// Pour mode éco
 static bool gpsOn = false;
 
-//LED
+// LED
 void gererLED(byte r1, byte g1, byte b1, byte r2, byte g2, byte b2, int d1, int d2) {
   unsigned long t = millis() % (d1 + d2);
   if (t < d1) leds.setColorRGB(0, r1, g1, b1);
@@ -62,17 +62,17 @@ void updateLED() {
   else if (modeLED == 10) gererLED(255, 0, 0, 255, 255, 255, 333, 667);
 }
 
-
-//Affichage capteurs
-void UseCapteurs(){
+// Affichage capteurs
+void UseCapteurs() {
   updateTime();
   updateBME();
   
   Serial.print(F("Temperature: ")); Serial.print(temp); Serial.println(F(" C"));
-  Serial.print(F("Humidite: ")); Serial.print(hum); Serial.println(" %");
-  Serial.print(F("Pression: ")); Serial.print(press); Serial.println( " Pa");
-  Serial.print(F("Luminosite: ")); Serial.print(getLum()); Serial.println(" %");
+  Serial.print(F("Humidite: ")); Serial.print(hum); Serial.println(F(" %"));
+  Serial.print(F("Pression: ")); Serial.print(press); Serial.println(F(" Pa"));
+  Serial.print(F("Luminosite: ")); Serial.print(getLum()); Serial.println(F(" %"));
 }
+
 // ISR
 void ISR_R() { btnR = true; }
 void ISR_V() { btnV = true; }
@@ -84,8 +84,8 @@ void updateTime() {
     return;
   }
   DateTime now = rtc.now();
-  Y = now.year(); M = now.month(); D = now.day(); //jour précis
-  h = now.hour(); m = now.minute(); s = now.second(); //heure précise
+  Y = now.year(); M = now.month(); D = now.day();
+  h = now.hour(); m = now.minute(); s = now.second();
   
   Serial.print(F("Heure : "));
   if (h < 10) Serial.print('0');
@@ -99,91 +99,83 @@ void updateTime() {
 // Capteurs
 void updateBME() {
   if (bmeOK) {
-    bme.read(press, temp, hum); // ordre IMPORTANT : pression, température, humidité
+    bme.read(press, temp, hum);
   }
 }
 
-float getLum(){
-  return analogRead(PIN_LUM) * 100 / 1023;
+float getLum() {
+  return analogRead(PIN_LUM) * 100.0 / 1023.0;
 }
-
 
 // GPS
 void getGPS() {
   unsigned long t0 = millis();
+  latitude = NAN;
+  longitude = NAN;
+  
   while (millis() - t0 < 5000) {
-    while (gpsSerial.available()) {
-      if (gps.encode(gpsSerial.read())) {
-        if (gps.location.isValid()){
-          latitude = gps.location.lat();
-          longitude = gps.location.lng();
-          Serial.print(F("GPS Position: ")); 
-          Serial.print(latitude, 5);
-          Serial.print(", "); 
-          Serial.println(longitude, 5);
-        }
-        else{
-          latitude = NAN;
-          longitude = NAN;
-          Serial.println(F("GPS invalide"));
-        }
+    while (gpsSerial.available() > 0) {
+      char c = gpsSerial.read();
+      gps.encode(c);
+      
+      if (gps.location.isUpdated() && gps.location.isValid()) {
+        latitude = gps.location.lat();
+        longitude = gps.location.lng();
+        Serial.print(F("GPS Position: ")); 
+        Serial.print(latitude, 6);
+        Serial.print(F(", ")); 
+        Serial.println(longitude, 6);
         return;
       }
     }
   }
+  
   Serial.println(F("GPS Timeout - Pas de signal"));
-  latitude = NAN;
-  longitude = NAN;
 }
 
 // SD
 void saveSD() {
-  if (sdOK) {
-
-
-    char nomFichier[25];
-    sprintf(
-      nomFichier,
-      "%04d%02d%02d.LOG",
-      Y, M, D);
-    
-    digitalWrite(PIN_CS, LOW);
-    fichier = SD.open(nomFichier, FILE_WRITE);
-
-    if (fichier){
-
-      fichier.print("TIME : "); 
-      fichier.print(h); fichier.print(":"); 
-      fichier.print(m); fichier.print(":"); 
-      fichier.print(s);
-
-      fichier.print("TEMP : "); fichier.print(temp); fichier.println("°C");
-      fichier.print("HUM : "); fichier.print(hum); fichier.println("%");
-      fichier.print("PRESS : "); fichier.println(press);
-      fichier.print("LUM : "); fichier.print(getLum()); fichier.println("%");
-
-      if (!isnan(latitude) && !isnan(longitude)){
-        fichier.print("LONG : ");fichier.println(longitude, 5);
-        fichier.print("LAT : "); fichier.println(latitude, 5);
-      }
-      else {
-        fichier.println("GPS INVALIDE");
-      }
-
-      fichier.println("=====================");
-
-      fichier.close();
-
-      Serial.println(F("Écriture finie"));
-    }
-    digitalWrite(PIN_CS, HIGH);
-  }
-  else
-  {
+  if (!sdOK) {
     Serial.println(F("ERREUR: Carte SD absente"));
     modeLED = 10;
+    return;
   }
   
+  char nomFichier[20];
+  sprintf(nomFichier, "%04d%02d%02d.LOG", Y, M, D);
+  
+  fichier = SD.open(nomFichier, FILE_WRITE);
+
+  if (!fichier) {
+    Serial.println(F("ERREUR ouverture fichier"));
+    modeLED = 10;
+    return;
+  }
+
+  fichier.print(F("TIME: "));
+  if (h < 10) fichier.print('0');
+  fichier.print(h); fichier.print(':');
+  if (m < 10) fichier.print('0');
+  fichier.print(m); fichier.print(':');
+  if (s < 10) fichier.print('0');
+  fichier.println(s);
+  
+  fichier.print(F("TEMP: ")); fichier.print(temp); fichier.println(F(" C"));
+  fichier.print(F("HUM: ")); fichier.print(hum); fichier.println(F(" %"));
+  fichier.print(F("PRESS: ")); fichier.print(press); fichier.println(F(" Pa"));
+  fichier.print(F("LUM: ")); fichier.print(getLum()); fichier.println(F(" %"));
+
+  if (!isnan(latitude) && !isnan(longitude)) {
+    fichier.print(F("LAT: ")); fichier.println(latitude, 5);
+    fichier.print(F("LONG: ")); fichier.println(longitude, 5);
+  } else {
+    fichier.println(F("GPS INVALIDE"));
+  }
+
+  fichier.println(F("====================="));
+  fichier.close();
+
+  Serial.println(F("Écriture finie"));
 }
 
 // Boutons
@@ -223,9 +215,7 @@ void modeStandard() {
   setLED(1);
   Serial.println(F("\n===== MODE STANDARD ====="));
   getGPS();
-  
   UseCapteurs();
-  
   saveSD();
   delay(10000);
 }
@@ -233,27 +223,21 @@ void modeStandard() {
 void modeEco() {
   setLED(3);
   Serial.println(F("\n===== MODE ECONOMIQUE ====="));
-
   
-  // GPS une mesure sur deux
   gpsOn = !gpsOn;
   if (gpsOn) {
     getGPS();
   }
 
   UseCapteurs();
-
   saveSD();
   delay(20000);  
 }
 
 void modeMaint() {
   setLED(4);
-
   Serial.println(F("\n===== MODE MAINTENANCE ====="));
-
   UseCapteurs();
-
   delay(2000);
 }
 
@@ -267,19 +251,12 @@ void setup() {
   pinMode(PIN_LUM, INPUT);
   pinMode(PIN_CS, OUTPUT);
   
-  
   // RTC
   Serial.print(F("RTC..."));
   if (rtc.begin()) {
     rtcOK = true;
-    /*rtc.disable32K();
-    rtc.clearAlarm(1);
-    rtc.clearAlarm(2);
-    rtc.writeSqwPinMode(DS3231_OFF);
-    rtc.adjust(DateTime(F(__DATE__), F(__TIME__))); */
     Serial.println(F("OK"));
-  } 
-  else {
+  } else {
     Serial.println(F("ERR"));
     modeLED = 5;
   }
@@ -305,13 +282,13 @@ void setup() {
   }
   
   // SD
-  Serial.print("SD...");
+  Serial.print(F("SD..."));
   digitalWrite(PIN_CS, HIGH);
   delay(50);
   
   if (SD.begin(PIN_CS)) {
     sdOK = true;
-    Serial.println("OK");
+    Serial.println(F("OK"));
   } else {
     Serial.println(F("ERREUR"));
     modeLED = 10;
