@@ -21,15 +21,15 @@ BME280I2C bme;
 ChainableLED leds(PIN_LED_1, PIN_LED_2, 1);
 File fichier;
 
-// Modes
+
 uint8_t mode = 0, modePrev = 0, modeLED = 0;
 volatile bool btnR = false, btnV = false;
 bool sdOK = false, rtcOK = false, bmeOK = false;
 
-// Coordonnées GPS
+
 double latitude = NAN, longitude = NAN;
 
-// Repère temporel (Date & heure, minute, seconde)
+
 int Y;
 byte M, D, h, m, s;
 
@@ -39,7 +39,10 @@ float temp, hum, press;
 // Pour mode éco
 static bool gpsOn = false;
 
-// LED
+
+unsigned long configStartTime = 0;
+
+
 void gererLED(byte r1, byte g1, byte b1, byte r2, byte g2, byte b2, int d1, int d2) {
   unsigned long t = millis() % (d1 + d2);
   if (t < d1) leds.setColorRGB(0, r1, g1, b1);
@@ -212,19 +215,28 @@ void checkButtons() {
 }
 
 // Modes
+void modeConfig() {
+  setLED(2);
+  Serial.println(F("\n===== MODE CONFIG ====="));
+  
+
+  if (millis() - configStartTime >= 10000) {
+    Serial.println(F("Timeout 30 min - Passage en mode standard"));
+    mode = 0;
+    setLED(1);
+    return;
+  }
+  
+  delay(2000);
+}
+
 void modeStandard() {
   setLED(1);
   Serial.println(F("\n===== MODE STANDARD ====="));
   getGPS();
   UseCapteurs();
   saveSD();
-  
-}
-
-void modeConfig() {
-  setLED(2);
-  Serial.println(F("\n===== MODE CONFIG ====="));
-  delay(2000);
+  delay(10000);
 }
 
 void modeEco() {
@@ -238,14 +250,14 @@ void modeEco() {
 
   UseCapteurs();
   saveSD();
-   
+  delay(20000);  
 }
 
 void modeMaint() {
   setLED(4);
   Serial.println(F("\n===== MODE MAINTENANCE ====="));
   UseCapteurs();
- 
+  delay(2000);
 }
 
 void setup() {
@@ -259,7 +271,7 @@ void setup() {
   pinMode(PIN_CS, OUTPUT);
   
   // Vérifier si le bouton rouge est pressé au démarrage
-  delay(100); // Petit délai pour stabiliser la lecture
+  delay(100);
   bool startInConfigMode = (digitalRead(PIN_BTN_R) == LOW);
   
   // RTC
@@ -307,10 +319,11 @@ void setup() {
   
   Serial.println(F("=PRET=\n"));
   
-  // Démarrer en mode config si bouton rouge pressé
+ 
   if (startInConfigMode) {
     mode = 1;
     setLED(2);
+    configStartTime = millis();
     Serial.println(F(">>> DEMARRAGE EN MODE CONFIG"));
   } else {
     mode = 0;
