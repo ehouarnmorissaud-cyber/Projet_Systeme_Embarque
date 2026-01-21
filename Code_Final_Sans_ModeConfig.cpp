@@ -49,6 +49,7 @@ void gererLED(byte r1, byte g1, byte b1, byte r2, byte g2, byte b2, int d1, int 
 void setLED(byte md) {
   modeLED = md;
   if (md == 1) leds.setColorRGB(0, 0, 255, 0);
+  else if (md == 2) leds.setColorRGB(0, 255, 255, 0); // Jaune pour mode config
   else if (md == 3) leds.setColorRGB(0, 0, 0, 255);
   else if (md == 4) leds.setColorRGB(0, 255, 165, 0);
   else leds.setColorRGB(0, 0, 0, 0);
@@ -217,7 +218,13 @@ void modeStandard() {
   getGPS();
   UseCapteurs();
   saveSD();
-  delay(10000);
+  
+}
+
+void modeConfig() {
+  setLED(2);
+  Serial.println(F("\n===== MODE CONFIG ====="));
+  delay(2000);
 }
 
 void modeEco() {
@@ -231,14 +238,14 @@ void modeEco() {
 
   UseCapteurs();
   saveSD();
-  delay(20000);  
+   
 }
 
 void modeMaint() {
   setLED(4);
   Serial.println(F("\n===== MODE MAINTENANCE ====="));
   UseCapteurs();
-  delay(2000);
+ 
 }
 
 void setup() {
@@ -250,6 +257,10 @@ void setup() {
   pinMode(PIN_BTN_V, INPUT_PULLUP);
   pinMode(PIN_LUM, INPUT);
   pinMode(PIN_CS, OUTPUT);
+  
+  // Vérifier si le bouton rouge est pressé au démarrage
+  delay(100); // Petit délai pour stabiliser la lecture
+  bool startInConfigMode = (digitalRead(PIN_BTN_R) == LOW);
   
   // RTC
   Serial.print(F("RTC..."));
@@ -295,8 +306,16 @@ void setup() {
   }
   
   Serial.println(F("=PRET=\n"));
-  mode = 0;
-  setLED(1);
+  
+  // Démarrer en mode config si bouton rouge pressé
+  if (startInConfigMode) {
+    mode = 1;
+    setLED(2);
+    Serial.println(F(">>> DEMARRAGE EN MODE CONFIG"));
+  } else {
+    mode = 0;
+    setLED(1);
+  }
   
   attachInterrupt(digitalPinToInterrupt(PIN_BTN_R), ISR_R, FALLING);
   attachInterrupt(digitalPinToInterrupt(PIN_BTN_V), ISR_V, FALLING);
@@ -307,6 +326,7 @@ void loop() {
   updateLED();
   
   if (mode == 0) modeStandard();
+  else if (mode == 1) modeConfig();
   else if (mode == 2) modeEco();
   else if (mode == 3) modeMaint();
 }
